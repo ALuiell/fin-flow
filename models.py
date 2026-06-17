@@ -16,6 +16,7 @@ class Category:
     type: str  # 'income' or 'expense'
     icon: Optional[str]  # Emoji icon e.g. '🍏'
     color: str  # HEX code
+    parent_id: Optional[int] = None
 
 @dataclass
 class Transaction:

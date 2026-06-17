@@ -1,9 +1,9 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QFrame, QMessageBox, QTabWidget, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                             QPushButton, QTableWidget, QTableWidgetItem,
+                             QHeaderView, QFrame, QMessageBox, QTabWidget,
                              QFormLayout, QLineEdit, QComboBox, QInputDialog)
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QKeySequence, QShortcut
 from database.db_manager import DBManager
 from models import Account, Category
 from ui.dialogs import AccountDialog, CategoryDialog
@@ -24,7 +24,7 @@ class SettingsPage(QWidget):
 
         # Таб-виджет для разделения настроек
         self.tabs = QTabWidget()
-        
+
         # 1. Основные
         self.tab_general = QWidget()
         self.init_general_tab()
@@ -41,6 +41,11 @@ class SettingsPage(QWidget):
         self.tabs.addTab(self.tab_categories, "📁 Категории")
 
         layout.addWidget(self.tabs)
+
+    def refresh_data(self):
+        self.refresh_rates()
+        self.refresh_accounts()
+        self.refresh_categories()
 
     # --- ВКЛАДКА 1: ОСНОВНЫЕ НАСТРОЙКИ ---
     def init_general_tab(self):
@@ -65,15 +70,21 @@ class SettingsPage(QWidget):
         self.salary_input = QLineEdit()
         planned = self.db.get_setting("planned_monthly_income", "2000")
         self.salary_input.setText(planned)
-        
+
         salary_save_btn = QPushButton("Сохранить доход")
         salary_save_btn.setObjectName("SecondaryButton")
         salary_save_btn.clicked.connect(self.save_salary)
-        
+
         salary_h = QHBoxLayout()
         salary_h.addWidget(self.salary_input)
         salary_h.addWidget(salary_save_btn)
         form_lay.addRow("Планируемый доход в месяц:", salary_h)
+
+        # Открыть папку с БД
+        self.open_db_btn = QPushButton("📂 Открыть папку с базой данных")
+        self.open_db_btn.setObjectName("SecondaryButton")
+        self.open_db_btn.clicked.connect(self.open_db_folder)
+        form_lay.addRow("Расположение данных:", self.open_db_btn)
 
         lay.addWidget(form_card)
 
@@ -87,12 +98,12 @@ class SettingsPage(QWidget):
         rates_title = QLabel("Курсы обмена валют (к USD)")
         rates_title.setObjectName("CardTitle")
         rates_header.addWidget(rates_title)
-        
+
         self.sync_btn = QPushButton("🔄 Синхронизировать из сети")
         self.sync_btn.setObjectName("PrimaryButton")
         self.sync_btn.clicked.connect(self.sync_rates)
         rates_header.addWidget(self.sync_btn)
-        
+
         rates_lay.addLayout(rates_header)
 
         self.rates_table = QTableWidget()
@@ -112,7 +123,7 @@ class SettingsPage(QWidget):
         for row, (code, val) in enumerate(rates.items()):
             self.rates_table.setItem(row, 0, QTableWidgetItem(code))
             self.rates_table.setItem(row, 1, QTableWidgetItem(f"{val:.5f}"))
-            
+
             edit_btn = QPushButton("✏️")
             edit_btn.setObjectName("SecondaryButton")
             edit_btn.setMaximumWidth(40)
@@ -121,8 +132,8 @@ class SettingsPage(QWidget):
 
     def edit_rate(self, code: str, current_val: float):
         new_val, ok = QInputDialog.getDouble(
-            self, "Курс валюты", 
-            f"Введите стоимость 1 {code} в USD:", 
+            self, "Курс валюты",
+            f"Введите стоимость 1 {code} в USD:",
             current_val, 0.00001, 10000.0, 5
         )
         if ok:
@@ -159,6 +170,16 @@ class SettingsPage(QWidget):
         except ValueError:
             QMessageBox.warning(self, "Ошибка ввода", "Введите корректное число для дохода.")
 
+    def open_db_folder(self):
+        import os, sys, subprocess
+        db_dir = os.path.dirname(os.path.abspath(self.db.db_path))
+        if sys.platform == 'win32':
+            os.startfile(db_dir)
+        elif sys.platform == 'darwin':
+            subprocess.Popen(['open', db_dir])
+        else:
+            subprocess.Popen(['xdg-open', db_dir])
+
     # --- ВКЛАДКА 2: УПРАВЛЕНИЕ СЧЕТАМИ ---
     def init_accounts_tab(self):
         lay = QVBoxLayout(self.tab_accounts)
@@ -194,6 +215,13 @@ class SettingsPage(QWidget):
         self.acc_table.setSelectionMode(QTableWidget.SingleSelection)
         lay.addWidget(self.acc_table)
 
+        # Интерактивность
+        self.acc_table.itemDoubleClicked.connect(self.edit_account)
+
+        self.acc_del_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.acc_table)
+        self.acc_del_shortcut.setContext(Qt.WidgetShortcut)
+        self.acc_del_shortcut.activated.connect(self.delete_account)
+
         self.refresh_accounts()
 
     def refresh_accounts(self):
@@ -204,14 +232,14 @@ class SettingsPage(QWidget):
             self.acc_table.setItem(row, 1, QTableWidgetItem(a.name))
             self.acc_table.setItem(row, 2, QTableWidgetItem(f"{a.balance:,.2f}"))
             self.acc_table.setItem(row, 3, QTableWidgetItem(a.currency))
-            
+
             # Цветовой блок
             color_item = QTableWidgetItem("■■■")
             color_item.setForeground(QColor(a.color))
             self.acc_table.setItem(row, 4, color_item)
 
     def add_account(self):
-        dialog = AccountDialog(parent=self)
+        dialog = AccountDialog(self.db, parent=self)
         if dialog.exec() == AccountDialog.Accepted:
             self.db.add_account(
                 dialog.result_account.name,
@@ -227,11 +255,11 @@ class SettingsPage(QWidget):
         if row < 0:
             QMessageBox.warning(self, "Редактирование", "Выберите счет из таблицы.")
             return
-        
+
         acc_id = int(self.acc_table.item(row, 0).text())
         acc = self.db.get_account(acc_id)
         if acc:
-            dialog = AccountDialog(account=acc, parent=self)
+            dialog = AccountDialog(self.db, account=acc, parent=self)
             if dialog.exec() == AccountDialog.Accepted:
                 self.db.update_account(dialog.result_account)
                 self.refresh_accounts()
@@ -244,7 +272,7 @@ class SettingsPage(QWidget):
             return
 
         acc_id = int(self.acc_table.item(row, 0).text())
-        
+
         # Защита от удаления последнего счета
         if len(self.db.get_accounts()) <= 1:
             QMessageBox.warning(self, "Удаление", "Нельзя удалить единственный кошелек.")
@@ -293,31 +321,52 @@ class SettingsPage(QWidget):
         self.cat_table.setSelectionMode(QTableWidget.SingleSelection)
         lay.addWidget(self.cat_table)
 
+        # Интерактивность
+        self.cat_table.itemDoubleClicked.connect(self.edit_category)
+
+        self.cat_del_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.cat_table)
+        self.cat_del_shortcut.setContext(Qt.WidgetShortcut)
+        self.cat_del_shortcut.activated.connect(self.delete_category)
+
         self.refresh_categories()
 
     def refresh_categories(self):
         cats = self.db.get_categories()
-        self.cat_table.setRowCount(len(cats))
-        for row, c in enumerate(cats):
+
+        # Сортируем так, чтобы подкатегории шли сразу после родителей
+        sorted_cats = []
+        parents = [c for c in cats if c.parent_id is None]
+        for p in parents:
+            sorted_cats.append(p)
+            children = [c for c in cats if c.parent_id == p.id]
+            sorted_cats.extend(children)
+
+        self.cat_table.setRowCount(len(sorted_cats))
+        for row, c in enumerate(sorted_cats):
             self.cat_table.setItem(row, 0, QTableWidgetItem(str(c.id)))
             self.cat_table.setItem(row, 1, QTableWidgetItem(c.icon or ""))
-            self.cat_table.setItem(row, 2, QTableWidgetItem(c.name))
-            
+
+            name_text = c.name
+            if c.parent_id:
+                name_text = "   ↳ " + c.name
+            self.cat_table.setItem(row, 2, QTableWidgetItem(name_text))
+
             type_desc = "Доход" if c.type == "income" else "Расход"
             self.cat_table.setItem(row, 3, QTableWidgetItem(type_desc))
-            
+
             color_item = QTableWidgetItem("■■■")
             color_item.setForeground(QColor(c.color))
             self.cat_table.setItem(row, 4, color_item)
 
     def add_category(self):
-        dialog = CategoryDialog(parent=self)
+        dialog = CategoryDialog(self.db, parent=self)
         if dialog.exec() == CategoryDialog.Accepted:
             self.db.add_category(
                 dialog.result_category.name,
                 dialog.result_category.type,
                 dialog.result_category.icon,
-                dialog.result_category.color
+                dialog.result_category.color,
+                dialog.result_category.parent_id
             )
             self.refresh_categories()
             self.data_changed.emit()
@@ -336,7 +385,7 @@ class SettingsPage(QWidget):
                 QMessageBox.warning(self, "Редактирование", "Нельзя редактировать категорию 'Другое' по умолчанию.")
                 return
 
-            dialog = CategoryDialog(category=cat, parent=self)
+            dialog = CategoryDialog(self.db, category=cat, parent=self)
             if dialog.exec() == CategoryDialog.Accepted:
                 self.db.update_category(dialog.result_category)
                 self.refresh_categories()
@@ -350,7 +399,7 @@ class SettingsPage(QWidget):
 
         cat_id = int(self.cat_table.item(row, 0).text())
         cat = self.db.get_category(cat_id)
-        
+
         if cat.name == "Другое":
             QMessageBox.warning(self, "Удаление", "Категорию 'Другое' удалить нельзя.")
             return

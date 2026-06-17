@@ -44,6 +44,21 @@ class TestFinFlowLogic(unittest.TestCase):
         usd_amount = self.db.convert_amount(90.91, "RUB", "USD")
         self.assertAlmostEqual(usd_amount, 1.0, places=2)
 
+    def test_default_subcategories_are_created_once(self):
+        categories = self.db.get_categories()
+        products = next(c for c in categories if c.name == "Продукты" and c.parent_id is None)
+        product_children = [c for c in categories if c.parent_id == products.id]
+
+        self.assertTrue(any(c.name == "Бакалея и крупы" for c in product_children))
+
+        DBManager(self.db_path)
+        categories_after_reinit = self.db.get_categories()
+        product_children_after_reinit = [
+            c for c in categories_after_reinit
+            if c.parent_id == products.id and c.name == "Бакалея и крупы"
+        ]
+        self.assertEqual(len(product_children_after_reinit), 1)
+
     def test_transaction_balances(self):
         # Создаем категорию расходов
         cat_id = self.db.add_category("Тест Еда", "expense", "🍎", "#FF0000")

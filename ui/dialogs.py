@@ -1,9 +1,10 @@
-from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QLineEdit, QComboBox, QDateEdit, QPushButton, 
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                             QLineEdit, QComboBox, QDateEdit, QPushButton,
                              QFormLayout, QMessageBox, QWidget)
 from PySide6.QtCore import QDate, Qt
 from models import Transaction, Account, Category, Subscription
 from utils.analytics_helper import eval_expression
+from ui.custom_widgets import TagSelector
 
 class BaseDialog(QDialog):
     def __init__(self, title: str, parent=None):
@@ -27,7 +28,7 @@ class TransactionDialog(BaseDialog):
         super().__init__(title, parent)
         self.db = db
         self.transaction = transaction
-        
+
         self.init_ui()
         if transaction:
             self.load_transaction_data()
@@ -51,6 +52,8 @@ class TransactionDialog(BaseDialog):
         # 3. Валюта
         self.currency_combo = QComboBox()
         self.currency_combo.addItems(["USD", "EUR", "UAH", "RUB", "BYN", "KZT"])
+        base_curr = self.db.get_setting("base_currency", "USD")
+        self.currency_combo.setCurrentText(base_curr)
         form.addRow("Валюта:", self.currency_combo)
 
         # 4. Счет списания / Счет
@@ -81,8 +84,7 @@ class TransactionDialog(BaseDialog):
         form.addRow("Описание:", self.desc_input)
 
         # 9. Теги
-        self.tags_input = QLineEdit()
-        self.tags_input.setPlaceholderText("через запятую, например: отпуск, ремонт")
+        self.tags_input = TagSelector(self.db, self)
         form.addRow("Теги:", self.tags_input)
 
         layout.addLayout(form)
@@ -92,11 +94,11 @@ class TransactionDialog(BaseDialog):
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setObjectName("PrimaryButton")
         self.save_btn.clicked.connect(self.save)
-        
+
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.setObjectName("SecondaryButton")
         self.cancel_btn.clicked.connect(self.reject)
-        
+
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.save_btn)
         layout.addLayout(btn_layout)
@@ -113,7 +115,7 @@ class TransactionDialog(BaseDialog):
     def load_categories(self):
         self.category_combo.clear()
         self.categories = self.db.get_categories()
-        
+
         # Фильтруем в зависимости от выбранного типа
         current_type = self.type_combo.currentText().lower()
         # Если перевод, категории не нужны вовсе
@@ -124,9 +126,13 @@ class TransactionDialog(BaseDialog):
         else:
             return
 
-        for cat in self.categories:
-            if cat.type == target_type:
-                self.category_combo.addItem(f"{cat.icon} {cat.name}", cat.id)
+        # Группируем категории
+        parent_cats = [c for c in self.categories if c.parent_id is None and c.type == target_type]
+        for p_cat in parent_cats:
+            self.category_combo.addItem(f"{p_cat.icon} {p_cat.name}", p_cat.id)
+            for c_cat in self.categories:
+                if c_cat.parent_id == p_cat.id:
+                    self.category_combo.addItem(f"   ↳ {c_cat.icon} {c_cat.name}", c_cat.id)
 
     def on_type_changed(self, idx):
         type_str = self.type_combo.currentText()
@@ -158,19 +164,19 @@ class TransactionDialog(BaseDialog):
     def load_transaction_data(self):
         t = self.transaction
         self.amount_input.setText(str(t.amount))
-        
+
         # Устанавливаем валюту
         idx = self.currency_combo.findText(t.currency)
         if idx >= 0:
             self.currency_combo.setCurrentIndex(idx)
-            
+
         # Устанавливаем дату
         qdate = QDate.fromString(t.date, "yyyy-MM-dd")
         self.date_input.setDate(qdate)
-        
+
         # Устанавливаем описание и теги
         self.desc_input.setText(t.description or "")
-        self.tags_input.setText(t.tags or "")
+        self.tags_input.set_tags(t.tags or "")
 
         # Устанавливаем счет списания
         idx = self.account_combo.findData(t.account_id)
@@ -209,10 +215,10 @@ class TransactionDialog(BaseDialog):
         account_id = self.account_combo.currentData()
         date_str = self.date_input.date().toString("yyyy-MM-dd")
         desc = self.desc_input.text().strip()
-        tags = self.tags_input.text().strip()
+        tags = self.tags_input.get_tags().strip()
 
         type_str = self.type_combo.currentText()
-        
+
         category_id = None
         transfer_to_account_id = None
 
@@ -229,7 +235,7 @@ class TransactionDialog(BaseDialog):
 
         # Создаем/Обновляем транзакцию
         t_id = self.transaction.id if self.transaction else None
-        
+
         # Если мы редактируем транзакцию, сначала удалим старую, чтобы вернуть балансы, а потом запишем новую
         if self.transaction:
             self.db.delete_transaction(t_id)
@@ -250,9 +256,10 @@ class TransactionDialog(BaseDialog):
 
 
 class AccountDialog(BaseDialog):
-    def __init__(self, account: Account = None, parent=None):
+    def __init__(self, db, account: Account = None, parent=None):
         title = "Редактировать счет" if account else "Создать счет"
         super().__init__(title, parent)
+        self.db = db
         self.account = account
         self.init_ui()
         if account:
@@ -272,6 +279,8 @@ class AccountDialog(BaseDialog):
 
         self.currency_combo = QComboBox()
         self.currency_combo.addItems(["USD", "EUR", "UAH", "RUB", "BYN", "KZT"])
+        base_curr = self.db.get_setting("base_currency", "USD")
+        self.currency_combo.setCurrentText(base_curr)
         form.addRow("Валюта:", self.currency_combo)
 
         # Простой выбор цвета (из предопределенных красивых HEX кодов)
@@ -295,11 +304,11 @@ class AccountDialog(BaseDialog):
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setObjectName("PrimaryButton")
         self.save_btn.clicked.connect(self.save)
-        
+
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.setObjectName("SecondaryButton")
         self.cancel_btn.clicked.connect(self.reject)
-        
+
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.save_btn)
         layout.addLayout(btn_layout)
@@ -308,7 +317,7 @@ class AccountDialog(BaseDialog):
         self.name_input.setText(self.account.name)
         self.balance_input.setText(str(self.account.balance))
         self.currency_combo.setCurrentText(self.account.currency)
-        
+
         # Ищем цвет
         for i in range(self.color_combo.count()):
             if self.color_combo.itemData(i) == self.account.color:
@@ -320,7 +329,7 @@ class AccountDialog(BaseDialog):
         if not name:
             QMessageBox.warning(self, "Ошибка ввода", "Введите название счета.")
             return
-        
+
         try:
             balance = float(self.balance_input.text().replace(",", "."))
         except ValueError:
@@ -341,9 +350,10 @@ class AccountDialog(BaseDialog):
 
 
 class CategoryDialog(BaseDialog):
-    def __init__(self, category: Category = None, parent=None):
+    def __init__(self, db, category: Category = None, parent=None):
         title = "Редактировать категорию" if category else "Создать категорию"
         super().__init__(title, parent)
+        self.db = db
         self.category = category
         self.init_ui()
         if category:
@@ -359,7 +369,13 @@ class CategoryDialog(BaseDialog):
         self.type_combo = QComboBox()
         self.type_combo.addItem("Расход", "expense")
         self.type_combo.addItem("Доход", "income")
+        self.type_combo.currentIndexChanged.connect(self.load_parent_categories)
         form.addRow("Тип:", self.type_combo)
+
+        self.parent_combo = QComboBox()
+        form.addRow("Родительская категория:", self.parent_combo)
+
+        self.load_parent_categories()
 
         self.icon_input = QLineEdit()
         self.icon_input.setPlaceholderText("Эмодзи (например: 🍏)")
@@ -388,25 +404,43 @@ class CategoryDialog(BaseDialog):
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setObjectName("PrimaryButton")
         self.save_btn.clicked.connect(self.save)
-        
+
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.setObjectName("SecondaryButton")
         self.cancel_btn.clicked.connect(self.reject)
-        
+
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.save_btn)
         layout.addLayout(btn_layout)
 
+    def load_parent_categories(self):
+        self.parent_combo.clear()
+        self.parent_combo.addItem("Нет (Это основная категория)", None)
+
+        target_type = self.type_combo.currentData()
+        categories = self.db.get_categories()
+        for cat in categories:
+            if cat.parent_id is None and cat.type == target_type:
+                if self.category and cat.id == self.category.id:
+                    continue
+                self.parent_combo.addItem(f"{cat.icon} {cat.name}", cat.id)
+
     def load_data(self):
         self.name_input.setText(self.category.name)
         self.icon_input.setText(self.category.icon or "")
-        
+
         # Тип
         if self.category.type == "income":
             self.type_combo.setCurrentIndex(1)
         else:
             self.type_combo.setCurrentIndex(0)
-            
+
+        # Родитель
+        if self.category.parent_id:
+            idx = self.parent_combo.findData(self.category.parent_id)
+            if idx >= 0:
+                self.parent_combo.setCurrentIndex(idx)
+
         # Цвет
         for i in range(self.color_combo.count()):
             if self.color_combo.itemData(i) == self.category.color:
@@ -418,20 +452,22 @@ class CategoryDialog(BaseDialog):
         if not name:
             QMessageBox.warning(self, "Ошибка ввода", "Введите название категории.")
             return
-        
+
         icon = self.icon_input.text().strip()
         if not icon:
             icon = "💸"  # Дефолтная иконка
 
         type_ = self.type_combo.currentData()
         color = self.color_combo.currentData()
+        parent_id = self.parent_combo.currentData()
 
         self.result_category = Category(
             id=self.category.id if self.category else None,
             name=name,
             type=type_,
             icon=icon,
-            color=color
+            color=color,
+            parent_id=parent_id
         )
         self.accept()
 
@@ -460,6 +496,8 @@ class SubscriptionDialog(BaseDialog):
 
         self.currency_combo = QComboBox()
         self.currency_combo.addItems(["USD", "EUR", "UAH", "RUB", "BYN", "KZT"])
+        base_curr = self.db.get_setting("base_currency", "USD")
+        self.currency_combo.setCurrentText(base_curr)
         form.addRow("Валюта:", self.currency_combo)
 
         self.category_combo = QComboBox()
@@ -482,11 +520,11 @@ class SubscriptionDialog(BaseDialog):
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setObjectName("PrimaryButton")
         self.save_btn.clicked.connect(self.save)
-        
+
         self.cancel_btn = QPushButton("Отмена")
         self.cancel_btn.setObjectName("SecondaryButton")
         self.cancel_btn.clicked.connect(self.reject)
-        
+
         btn_layout.addWidget(self.cancel_btn)
         btn_layout.addWidget(self.save_btn)
         layout.addLayout(btn_layout)
@@ -514,16 +552,16 @@ class SubscriptionDialog(BaseDialog):
         self.name_input.setText(sub.name)
         self.amount_input.setText(str(sub.amount))
         self.currency_combo.setCurrentText(sub.currency)
-        
+
         idx = self.category_combo.findData(sub.category_id)
         if idx >= 0:
             self.category_combo.setCurrentIndex(idx)
-            
+
         if sub.period == "yearly":
             self.period_combo.setCurrentIndex(1)
         else:
             self.period_combo.setCurrentIndex(0)
-            
+
         qdate = QDate.fromString(sub.next_payment_date, "yyyy-MM-dd")
         self.date_input.setDate(qdate)
 
@@ -533,7 +571,7 @@ class SubscriptionDialog(BaseDialog):
         if not name:
             QMessageBox.warning(self, "Ошибка ввода", "Введите название подписки.")
             return
-            
+
         try:
             amount = float(self.amount_input.text())
             if amount <= 0:

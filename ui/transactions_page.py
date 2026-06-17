@@ -1,12 +1,13 @@
 import csv
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                             QPushButton, QTableWidget, QTableWidgetItem, 
-                             QHeaderView, QLineEdit, QComboBox, QDateEdit, 
+from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+                             QPushButton, QTableWidget, QTableWidgetItem,
+                             QHeaderView, QLineEdit, QComboBox, QDateEdit,
                              QFileDialog, QMessageBox)
 from PySide6.QtCore import Qt, Signal, QDate
 from PySide6.QtGui import QColor
 from models import Transaction
 from ui.dialogs import TransactionDialog
+from ui.custom_widgets import CheckableComboBox
 from datetime import datetime
 
 class TransactionsPage(QWidget):
@@ -36,9 +37,16 @@ class TransactionsPage(QWidget):
         filter_layout.addWidget(self.search_input, stretch=2)
 
         # Фильтр категорий
-        self.cat_filter = QComboBox()
-        self.cat_filter.currentIndexChanged.connect(self.refresh_data)
+        self.cat_filter = CheckableComboBox()
+        self.cat_filter.lineEdit().setPlaceholderText("Все категории")
+        self.cat_filter.model().dataChanged.connect(self.refresh_data)
         filter_layout.addWidget(self.cat_filter, stretch=1)
+
+        # Фильтр тегов
+        self.tag_filter = CheckableComboBox()
+        self.tag_filter.lineEdit().setPlaceholderText("Все теги")
+        self.tag_filter.model().dataChanged.connect(self.refresh_data)
+        filter_layout.addWidget(self.tag_filter, stretch=1)
 
         # Фильтр счетов
         self.acc_filter = QComboBox()
@@ -65,7 +73,7 @@ class TransactionsPage(QWidget):
 
         # 2. Кнопки действий
         btn_layout = QHBoxLayout()
-        
+
         self.add_btn = QPushButton("➕ Добавить операцию")
         self.add_btn.setObjectName("PrimaryButton")
         self.add_btn.clicked.connect(self.add_transaction)
@@ -108,52 +116,71 @@ class TransactionsPage(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents) # Сумма
         layout.addWidget(self.table)
 
+        # Интерактивность
+        self.table.itemDoubleClicked.connect(self.edit_transaction)
+
+        from PySide6.QtGui import QKeySequence, QShortcut
+        self.del_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.table)
+        self.del_shortcut.setContext(Qt.WidgetShortcut)
+        self.del_shortcut.activated.connect(self.delete_transaction)
+
         self.load_filters()
         self.refresh_data()
 
     def load_filters(self):
         # Отключаем сигналы временно
-        self.cat_filter.blockSignals(True)
+        try:
+            self.cat_filter.model().dataChanged.disconnect(self.refresh_data)
+            self.tag_filter.model().dataChanged.disconnect(self.refresh_data)
+        except:
+            pass
         self.acc_filter.blockSignals(True)
 
         self.cat_filter.clear()
-        self.cat_filter.addItem("Все категории", 0)
-        for cat in self.db.get_categories():
-            self.cat_filter.addItem(f"{cat.icon} {cat.name}", cat.id)
+        categories = self.db.get_categories()
+        parents = [c for c in categories if c.parent_id is None]
+        for p in parents:
+            self.cat_filter.addItem(f"{p.icon} {p.name}", p.id)
+            children = [c for c in categories if c.parent_id == p.id]
+            for c in children:
+                self.cat_filter.addItem(f"   ↳ {c.icon} {c.name}", c.id)
+
+        self.tag_filter.clear()
+        tags = self.db.get_all_tags()
+        for t in tags:
+            self.tag_filter.addItem(f"#{t}", t)
 
         self.acc_filter.clear()
         self.acc_filter.addItem("Все счета", 0)
         for acc in self.db.get_accounts():
             self.acc_filter.addItem(acc.name, acc.id)
 
-        self.cat_filter.blockSignals(False)
+        self.cat_filter.model().dataChanged.connect(self.refresh_data)
+        self.tag_filter.model().dataChanged.connect(self.refresh_data)
         self.acc_filter.blockSignals(False)
 
-    def refresh_data(self):
+    def refresh_data(self, *args, **kwargs):
         search = self.search_input.text().strip()
-        cat_id = self.cat_filter.currentData()
+        cat_ids = self.cat_filter.currentData()
+        tag_list = self.tag_filter.currentData()
         acc_id = self.acc_filter.currentData()
         start = self.date_start.date().toString("yyyy-MM-dd")
         end = self.date_end.date().toString("yyyy-MM-dd")
 
-        # Получаем транзакции с фильтрами
-        # Если 0 (Все), передаем None
-        cat_param = cat_id if cat_id != 0 else None
-        acc_param = acc_id if acc_id != 0 else None
+        acc_param = [acc_id] if acc_id != 0 else None
         search_param = search if search else None
 
         # Выполняем поиск по тегу, если строка начинается с #
-        tag_param = None
         if search_param and search_param.startswith("#"):
-            tag_param = search_param[1:]
+            tag_list.append(search_param[1:])
             search_param = None
 
         txs = self.db.get_transactions(
-            start_date=start, 
-            end_date=end, 
-            category_id=cat_param, 
-            account_id=acc_param,
-            tag=tag_param
+            start_date=start,
+            end_date=end,
+            category_ids=cat_ids if cat_ids else None,
+            account_ids=acc_param,
+            tags=tag_list if tag_list else None
         )
 
         # Дополнительная ручная фильтрация по описанию, если поиск не по тегам
@@ -165,10 +192,10 @@ class TransactionsPage(QWidget):
         for row_idx, t in enumerate(txs):
             # ID
             self.table.setItem(row_idx, 0, QTableWidgetItem(str(t['id'])))
-            
+
             # Дата
             self.table.setItem(row_idx, 1, QTableWidgetItem(t['date']))
-            
+
             # Категория
             if t['transfer_to_account_id']:
                 cat_desc = f"🔄 Перевод"
@@ -219,7 +246,7 @@ class TransactionsPage(QWidget):
             return
 
         t_id = int(self.table.item(row, 0).text())
-        
+
         # Загружаем модель транзакции из БД
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
@@ -241,7 +268,7 @@ class TransactionsPage(QWidget):
         t_id = int(self.table.item(row, 0).text())
         reply = QMessageBox.question(self, "Удаление", "Вы действительно хотите удалить эту транзакцию и вернуть баланс счета?",
                                      QMessageBox.Yes | QMessageBox.No)
-        
+
         if reply == QMessageBox.Yes:
             if self.db.delete_transaction(t_id):
                 self.refresh_data()
@@ -284,24 +311,24 @@ class TransactionsPage(QWidget):
             with open(file_path, mode='r', encoding='utf-8-sig') as file:
                 reader = csv.reader(file)
                 header = next(reader)
-                
+
                 imported_count = 0
-                
+
                 # Кэшируем категории и счета для ускорения работы
                 categories = {c.name.lower(): c for c in self.db.get_categories()}
                 accounts = {a.name.lower(): a for a in self.db.get_accounts()}
-                
+
                 for row in reader:
                     if len(row) < 9:
                         continue
-                    
+
                     date_str, t_type, amount_str, currency, cat_name, acc_name, trans_acc_name, desc, tags = row
-                    
+
                     try:
                         amount = float(amount_str)
                     except ValueError:
                         continue
-                    
+
                     # Ищем или создаем счета
                     acc_name_l = acc_name.lower()
                     if acc_name_l not in accounts:
@@ -346,10 +373,10 @@ class TransactionsPage(QWidget):
                     )
                     self.db.add_transaction(t)
                     imported_count += 1
-                
+
                 QMessageBox.information(self, "Импорт", f"Успешно импортировано транзакций: {imported_count}")
                 self.refresh_data()
                 self.data_changed.emit()
-                
+
         except Exception as e:
             QMessageBox.critical(self, "Ошибка импорта", f"Не удалось импортировать файл:\n{e}")

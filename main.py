@@ -16,10 +16,10 @@ from ui.main_window import MainWindow
 def apply_dark_theme(app: QApplication):
     # Принудительно устанавливаем кроссплатформенный стиль Fusion
     app.setStyle("Fusion")
-    
+
     # Настраиваем темную палитру для всех стандартных элементов Qt
     palette = QPalette()
-    
+
     # Цветовая схема темной темы
     dark_bg = QColor(18, 18, 18)        # #121212
     card_bg = QColor(30, 30, 30)        # #1E1E1E
@@ -27,7 +27,7 @@ def apply_dark_theme(app: QApplication):
     text_color = QColor(224, 224, 224)  # #E0E0E0
     white = QColor(255, 255, 255)
     highlight_color = QColor(138, 43, 226) # #8A2BE2 (Фиолетовый)
-    
+
     palette.setColor(QPalette.Window, dark_bg)
     palette.setColor(QPalette.WindowText, text_color)
     palette.setColor(QPalette.Base, input_bg)
@@ -41,13 +41,13 @@ def apply_dark_theme(app: QApplication):
     palette.setColor(QPalette.Link, highlight_color)
     palette.setColor(QPalette.Highlight, highlight_color)
     palette.setColor(QPalette.HighlightedText, white)
-    
+
     # Цвета для отключенных (disabled) элементов
     palette.setColor(QPalette.Disabled, QPalette.WindowText, QColor(120, 120, 120))
     palette.setColor(QPalette.Disabled, QPalette.Text, QColor(120, 120, 120))
     palette.setColor(QPalette.Disabled, QPalette.ButtonText, QColor(120, 120, 120))
     palette.setColor(QPalette.Disabled, QPalette.Base, dark_bg)
-    
+
     app.setPalette(palette)
 
 def load_stylesheet(app: QApplication, qss_path: str):
@@ -62,12 +62,22 @@ def main():
     app = QApplication(sys.argv)
     apply_dark_theme(app)
     app.setApplicationName("FinFlow")
-    
-    # Пути
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    db_path = os.path.join(base_dir, "finflow.db")
+
+    # Пути ресурсов (стили, иконки)
+    if getattr(sys, 'frozen', False):
+        base_dir = sys._MEIPASS  # Папка временной распаковки PyInstaller
+    else:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+
     qss_path = os.path.join(base_dir, "ui", "styles.qss")
     icon_path = os.path.join(base_dir, "assets", "icon.png")
+
+    # Путь к базе данных (надежное место в папке пользователя)
+    app_data_dir = os.path.join(os.path.expanduser("~"), ".finflow")
+    if not os.path.exists(app_data_dir):
+        os.makedirs(app_data_dir, exist_ok=True)
+
+    db_path = os.path.join(app_data_dir, "finflow.db")
 
     # Инициализация базы данных
     db = DBManager(db_path=db_path)
@@ -77,13 +87,13 @@ def main():
 
     # Создание главного окна
     window = MainWindow(db)
-    
+
     # Установка иконки приложения
     if os.path.exists(icon_path):
         app_icon = QIcon(icon_path)
         app.setWindowIcon(app_icon)
         window.setWindowIcon(app_icon)
-    
+
     window.show()
     sys.exit(app.exec())
 

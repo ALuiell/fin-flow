@@ -21,6 +21,44 @@ class DBManager:
             conn.close()
 
 
+    def _ensure_default_subcategories(self, cursor):
+        cursor.execute("SELECT id FROM categories WHERE name = 'Зал' AND parent_id IS NULL")
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO categories (name, type, icon, color) VALUES ('Зал', 'expense', '💪', '#9C27B0')")
+
+        cursor.execute("SELECT id, name, type, color FROM categories WHERE parent_id IS NULL")
+        parent_categories = {r['name'].lower(): r for r in cursor.fetchall()}
+
+        subcategories_to_insert = [
+            ('Продукты', [('Бакалея и крупы', '🛒'), ('Мясо, птица и рыба', '🥩'), ('Молочные продукты и яйца', '🥛'), ('Овощи и фрукты', '🥦'), ('Хлеб и выпечка', '🍞'), ('Доставка', '🛵')]),
+            ('Транспорт', [('Топливо / Бензин', '⛽'), ('Такси', '🚕'), ('Общественный транспорт', '🚌'), ('Обслуживание авто и ремонт', '🔧'), ('Парковка и платные дороги', '🅿️')]),
+            ('Жилье и ЖКХ', [('Аренда / Ипотека', '🔑'), ('Коммунальные платежи (ЖКХ)', '🧾'), ('Интернет, ТВ и связь', '🌐'), ('Бытовая химия и хозтовары', '🧽'), ('Ремонт и мебель', '🛠️')]),
+            ('Кафе и Рестораны', [('Обеды / Бизнес-ланчи', '🍱'), ('Кофе и чай', '☕'), ('Фастфуд', '🍔'), ('Доставка еды', '🥡'), ('Рестораны и бары', '🍷')]),
+            ('Развлечения', [('Кино, театры и концерты', '🎟️'), ('Игры и развлекательные подписки', '🎮'), ('Хобби, книги и творчество', '🎨'), ('Спорт и активный отдых', '🏂')]),
+            ('Одежда и Покупки', [('Одежда и обувь', '👕'), ('Техника и электроника', '📱'), ('Косметика и личная гигиена', '🧴'), ('Подарки близким', '🎁'), ('Аксессуары', '🕶️')]),
+            ('Здоровье', [('Аптеки и лекарства', '💊'), ('Медицинские услуги и врачи', '🩺'), ('Анализы и обследования', '🧪'), ('Стоматология', '🦷'), ('Добавки', '🔋')]),
+            ('Зал', [('Абонемент', '🎫'), ('Персональный тренер', '🏋️'), ('Спортивная одежда', '🎽'), ('Добавки', '🔋')]),
+            ('Другое', [('Налоги и пошлины', '🏛️'), ('Штрафы', '🛑'), ('Комиссии банков', '🏦'), ('Карманные расходы', '💸')]),
+            ('Зарплата', [('Основная работа', '💼'), ('Аванс', '💰'), ('Премия / Бонусы', '🎉')]),
+            ('Инвестиции', [('Дивиденды', '📈'), ('Купоны по облигациям', '📜'), ('Доход от продажи активов', '💵'), ('Проценты по вкладам', '🏦')]),
+            ('Подработка', [('Фриланс / Проекты', '💻'), ('Продажа личных вещей', '📦'), ('Кэшбэк', '💳')]),
+            ('Подарки', [('Денежные подарки', '💌'), ('Донаты / Пожертвования', '🤝')])
+        ]
+
+        for parent_name, subs in subcategories_to_insert:
+            parent = parent_categories.get(parent_name.lower())
+            if not parent:
+                continue
+
+            cursor.execute("SELECT name FROM categories WHERE parent_id = ?", (parent['id'],))
+            existing_children = {row['name'].lower() for row in cursor.fetchall()}
+            for sub_name, sub_icon in subs:
+                if sub_name.lower() not in existing_children:
+                    cursor.execute(
+                        "INSERT INTO categories (name, type, icon, color, parent_id) VALUES (?, ?, ?, ?, ?)",
+                        (sub_name, parent['type'], sub_icon, parent['color'], parent['id'])
+                    )
+
     def init_db(self):
         """Создает таблицы и инициализирует дефолтные значения, если база пустая."""
         with self._get_connection() as conn:
@@ -61,9 +99,17 @@ class DBManager:
                 name TEXT NOT NULL,
                 type TEXT NOT NULL CHECK(type IN ('income', 'expense')),
                 icon TEXT,
-                color TEXT
+                color TEXT,
+                parent_id INTEGER,
+                FOREIGN KEY(parent_id) REFERENCES categories(id) ON DELETE CASCADE
             )
             """)
+
+            # Проверка наличия колонки parent_id в таблице categories (Миграция)
+            cursor.execute("PRAGMA table_info(categories)")
+            columns = [col['name'] for col in cursor.fetchall()]
+            if 'parent_id' not in columns:
+                cursor.execute("ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id) ON DELETE CASCADE")
 
             # 5. Таблица транзакций
             cursor.execute("""
@@ -158,6 +204,8 @@ class DBManager:
                 ]
                 cursor.executemany("INSERT INTO categories (name, type, icon, color) VALUES (?, ?, ?, ?)", default_categories)
 
+            self._ensure_default_subcategories(cursor)
+
             # Заполнение счетов по умолчанию
             cursor.execute("SELECT COUNT(*) FROM accounts")
             if cursor.fetchone()[0] == 0:
@@ -198,7 +246,7 @@ class DBManager:
         rates = self.get_rates()
         if from_curr not in rates or to_curr not in rates:
             return amount  # Если валюты нет, возвращаем без изменений
-        
+
         # Переводим в USD, затем в целевую валюту
         amount_usd = amount * rates[from_curr]
         amount_target = amount_usd / rates[to_curr]
@@ -240,31 +288,31 @@ class DBManager:
             return True
 
     # --- РАБОТА С КАТЕГОРИЯМИ (CATEGORIES) ---
-    def add_category(self, name: str, type_: str, icon: str, color: str) -> int:
+    def add_category(self, name: str, type_: str, icon: str, color: str, parent_id: Optional[int] = None) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("INSERT INTO categories (name, type, icon, color) VALUES (?, ?, ?, ?)",
-                           (name, type_, icon, color))
+            cursor.execute("INSERT INTO categories (name, type, icon, color, parent_id) VALUES (?, ?, ?, ?, ?)",
+                           (name, type_, icon, color, parent_id))
             conn.commit()
             return cursor.lastrowid
 
     def get_categories(self) -> List[Category]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, type, icon, color FROM categories")
-            return [Category(r['id'], r['name'], r['type'], r['icon'], r['color']) for r in cursor.fetchall()]
+            cursor.execute("SELECT id, name, type, icon, color, parent_id FROM categories ORDER BY parent_id NULLS FIRST, name")
+            return [Category(r['id'], r['name'], r['type'], r['icon'], r['color'], r['parent_id']) for r in cursor.fetchall()]
 
     def get_category(self, category_id: int) -> Optional[Category]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT id, name, type, icon, color FROM categories WHERE id = ?", (category_id,))
+            cursor.execute("SELECT id, name, type, icon, color, parent_id FROM categories WHERE id = ?", (category_id,))
             r = cursor.fetchone()
-            return Category(r['id'], r['name'], r['type'], r['icon'], r['color']) if r else None
+            return Category(r['id'], r['name'], r['type'], r['icon'], r['color'], r['parent_id']) if r else None
 
     def update_category(self, category: Category) -> bool:
         with self._get_connection() as conn:
-            conn.execute("UPDATE categories SET name = ?, type = ?, icon = ?, color = ? WHERE id = ?",
-                         (category.name, category.type, category.icon, category.color, category.id))
+            conn.execute("UPDATE categories SET name = ?, type = ?, icon = ?, color = ?, parent_id = ? WHERE id = ?",
+                         (category.name, category.type, category.icon, category.color, category.parent_id, category.id))
             conn.commit()
             return True
 
@@ -280,7 +328,7 @@ class DBManager:
             if other_id and other_id != category_id:
                 conn.execute("UPDATE transactions SET category_id = ? WHERE category_id = ?", (other_id, category_id))
                 conn.execute("UPDATE subscriptions SET category_id = ? WHERE category_id = ?", (other_id, category_id))
-            
+
             conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
             conn.commit()
             return True
@@ -289,7 +337,7 @@ class DBManager:
     def add_transaction(self, t: Transaction) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Вставляем транзакцию
             cursor.execute("""
             INSERT INTO transactions (amount, currency, category_id, account_id, transfer_to_account_id, date, description, tags)
@@ -314,10 +362,10 @@ class DBManager:
                 # Находим тип категории
                 category = self.get_category(t.category_id)
                 is_income = category and category.type == 'income'
-                
+
                 acc = self.get_account(t.account_id)
                 amount_acc = self.convert_amount(t.amount, t.currency, acc.currency)
-                
+
                 if is_income:
                     cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount_acc, t.account_id))
                 else:
@@ -326,14 +374,27 @@ class DBManager:
             conn.commit()
             return t_id
 
+    def get_all_tags(self) -> List[str]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT tags FROM transactions WHERE tags IS NOT NULL AND tags != ''")
+            all_tags = set()
+            for row in cursor.fetchall():
+                for t in row['tags'].split(','):
+                    t_clean = t.strip()
+                    if t_clean:
+                        all_tags.add(t_clean)
+            return sorted(list(all_tags))
+
     def get_transactions(self, start_date: Optional[str] = None, end_date: Optional[str] = None,
-                         category_id: Optional[int] = None, account_id: Optional[int] = None,
-                         tag: Optional[str] = None) -> List[Dict[str, Any]]:
+                         category_id: Optional[int] = None, category_ids: Optional[List[int]] = None,
+                         account_id: Optional[int] = None, account_ids: Optional[List[int]] = None,
+                         tag: Optional[str] = None, tags: Optional[List[str]] = None) -> List[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             query = """
-            SELECT t.id, t.amount, t.currency, t.category_id, t.account_id, t.transfer_to_account_id, 
-                   t.date, t.description, t.tags, 
+            SELECT t.id, t.amount, t.currency, t.category_id, t.account_id, t.transfer_to_account_id,
+                   t.date, t.description, t.tags,
                    c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type,
                    a.name as account_name, a.color as account_color,
                    a2.name as transfer_account_name, a2.color as transfer_account_color
@@ -351,15 +412,27 @@ class DBManager:
             if end_date:
                 query += " AND t.date <= ?"
                 params.append(end_date)
-            if category_id:
-                query += " AND t.category_id = ?"
-                params.append(category_id)
-            if account_id:
-                query += " AND (t.account_id = ? OR t.transfer_to_account_id = ?)"
-                params.extend([account_id, account_id])
-            if tag:
-                query += " AND t.tags LIKE ?"
-                params.append(f"%{tag}%")
+
+            c_ids = category_ids or ([category_id] if category_id else [])
+            if c_ids:
+                placeholders = ','.join('?' * len(c_ids))
+                query += f" AND (t.category_id IN ({placeholders}) OR t.category_id IN (SELECT id FROM categories WHERE parent_id IN ({placeholders})))"
+                params.extend(c_ids)
+                params.extend(c_ids)
+
+            a_ids = account_ids or ([account_id] if account_id else [])
+            if a_ids:
+                placeholders = ','.join('?' * len(a_ids))
+                query += f" AND (t.account_id IN ({placeholders}) OR t.transfer_to_account_id IN ({placeholders}))"
+                params.extend(a_ids)
+                params.extend(a_ids)
+
+            t_list = tags or ([tag] if tag else [])
+            if t_list:
+                tag_conditions = " OR ".join(["t.tags LIKE ?"] * len(t_list))
+                query += f" AND ({tag_conditions})"
+                for t_item in t_list:
+                    params.append(f"%{t_item}%")
 
             query += " ORDER BY t.date DESC, t.id DESC"
             cursor.execute(query, params)
@@ -368,7 +441,7 @@ class DBManager:
     def delete_transaction(self, t_id: int) -> bool:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Получаем детали транзакции
             cursor.execute("SELECT amount, currency, category_id, account_id, transfer_to_account_id FROM transactions WHERE id = ?", (t_id,))
             row = cursor.fetchone()
@@ -393,10 +466,10 @@ class DBManager:
             else:
                 category = self.get_category(category_id)
                 is_income = category and category.type == 'income'
-                
+
                 acc = self.get_account(account_id)
                 amount_acc = self.convert_amount(amount, currency, acc.currency)
-                
+
                 if is_income:
                     cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount_acc, account_id))
                 else:
@@ -432,17 +505,17 @@ class DBManager:
             # Считаем реальные траты по каждой категории за этот месяц
             for b in budgets:
                 cursor.execute("""
-                SELECT amount, currency FROM transactions 
+                SELECT amount, currency FROM transactions
                 WHERE category_id = ? AND date LIKE ? AND transfer_to_account_id IS NULL
                 """, (b['category_id'], f"{month}%"))
-                
+
                 total_spent = 0.0
                 for row in cursor.fetchall():
                     # Конвертируем в валюту лимита бюджета
                     total_spent += self.convert_amount(row['amount'], row['currency'], b['currency'])
-                
+
                 b['spent'] = round(total_spent, 2)
-            
+
             return budgets
 
     def delete_budget(self, budget_id: int) -> bool:
@@ -464,7 +537,7 @@ class DBManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, name, target_amount, current_amount, currency, deadline, status FROM goals")
-            return [Goal(r['id'], r['name'], r['target_amount'], r['current_amount'], r['currency'], r['deadline'], r['status']) 
+            return [Goal(r['id'], r['name'], r['target_amount'], r['current_amount'], r['currency'], r['deadline'], r['status'])
                     for r in cursor.fetchall()]
 
     def update_goal(self, goal: Goal) -> bool:
