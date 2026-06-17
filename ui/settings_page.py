@@ -1,9 +1,10 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QHeaderView, QFrame, QMessageBox, QTabWidget,
-                             QFormLayout, QLineEdit, QComboBox, QInputDialog)
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QKeySequence, QShortcut
+                             QFormLayout, QLineEdit, QComboBox, QInputDialog,
+                             QTreeView, QAbstractItemView)
+from PySide6.QtCore import Qt, Signal, QSortFilterProxyModel
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QStandardItemModel, QStandardItem
 from database.db_manager import DBManager
 from models import Account, Category
 from ui.dialogs import AccountDialog, CategoryDialog
@@ -109,7 +110,10 @@ class SettingsPage(QWidget):
         self.rates_table = QTableWidget()
         self.rates_table.setColumnCount(3)
         self.rates_table.setHorizontalHeaderLabels(["Код валюты", "1 ед. валюты в USD", "Редактировать"])
-        self.rates_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.rates_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.rates_table.setColumnWidth(0, 150)
+        self.rates_table.setColumnWidth(1, 250)
+        self.rates_table.setColumnWidth(2, 150)
         self.rates_table.verticalHeader().setVisible(False)
         self.rates_table.setEditTriggers(QTableWidget.NoEditTriggers)
         rates_lay.addWidget(self.rates_table)
@@ -207,8 +211,12 @@ class SettingsPage(QWidget):
         self.acc_table = QTableWidget()
         self.acc_table.setColumnCount(5)
         self.acc_table.setHorizontalHeaderLabels(["ID", "Название", "Баланс", "Валюта", "Цвет"])
-        self.acc_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.acc_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.acc_table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.acc_table.setColumnWidth(0, 50)
+        self.acc_table.setColumnWidth(1, 300)
+        self.acc_table.setColumnWidth(2, 200)
+        self.acc_table.setColumnWidth(3, 150)
+        self.acc_table.setColumnWidth(4, 100)
         self.acc_table.verticalHeader().setVisible(False)
         self.acc_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.acc_table.setSelectionBehavior(QTableWidget.SelectRows)
@@ -250,7 +258,7 @@ class SettingsPage(QWidget):
             self.refresh_accounts()
             self.data_changed.emit()
 
-    def edit_account(self):
+    def edit_account(self, *args):
         row = self.acc_table.currentRow()
         if row < 0:
             QMessageBox.warning(self, "Редактирование", "Выберите счет из таблицы.")
@@ -309,22 +317,26 @@ class SettingsPage(QWidget):
         btn_lay.addStretch()
         lay.addLayout(btn_lay)
 
-        self.cat_table = QTableWidget()
-        self.cat_table.setColumnCount(5)
-        self.cat_table.setHorizontalHeaderLabels(["ID", "Иконка", "Название", "Тип", "Цвет"])
-        self.cat_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.cat_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        self.cat_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.cat_table.verticalHeader().setVisible(False)
-        self.cat_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.cat_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.cat_table.setSelectionMode(QTableWidget.SingleSelection)
-        lay.addWidget(self.cat_table)
+        self.cat_search = QLineEdit()
+        self.cat_search.setPlaceholderText("Поиск по категориям...")
+        self.cat_search.setStyleSheet("background-color: #1E1E1E; border: 1px solid #3A3A3A; border-radius: 6px; padding: 6px;")
+        self.cat_proxy = None
+        self.cat_search.textChanged.connect(self.filter_categories)
+        lay.addWidget(self.cat_search)
+
+        self.cat_tree = QTreeView()
+        self.cat_tree.setStyleSheet("QTreeView { background-color: #181818; border: none; outline: none; } QTreeView::item { padding: 4px; } QTreeView::item:hover { background-color: #2A2A2A; border-radius: 4px; }")
+        self.cat_tree.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.cat_tree.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.cat_tree.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.cat_tree.setAlternatingRowColors(True)
+        self.cat_tree.setIndentation(40)
+        lay.addWidget(self.cat_tree)
 
         # Интерактивность
-        self.cat_table.itemDoubleClicked.connect(self.edit_category)
+        self.cat_tree.doubleClicked.connect(self.edit_category)
 
-        self.cat_del_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.cat_table)
+        self.cat_del_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.cat_tree)
         self.cat_del_shortcut.setContext(Qt.WidgetShortcut)
         self.cat_del_shortcut.activated.connect(self.delete_category)
 
@@ -334,29 +346,66 @@ class SettingsPage(QWidget):
         cats = self.db.get_categories()
 
         # Сортируем так, чтобы подкатегории шли сразу после родителей
-        sorted_cats = []
-        parents = [c for c in cats if c.parent_id is None]
-        for p in parents:
-            sorted_cats.append(p)
-            children = [c for c in cats if c.parent_id == p.id]
-            sorted_cats.extend(children)
+        model = QStandardItemModel()
+        model.setHorizontalHeaderLabels(["Категория", "Тип", "Цвет", "ID"])
 
-        self.cat_table.setRowCount(len(sorted_cats))
-        for row, c in enumerate(sorted_cats):
-            self.cat_table.setItem(row, 0, QTableWidgetItem(str(c.id)))
-            self.cat_table.setItem(row, 1, QTableWidgetItem(c.icon or ""))
+        parents = {}
+        # Сначала добавляем родительские
+        for c in cats:
+            if c.parent_id is None:
+                display_text = f"{c.icon or ''} {c.name}".strip()
+                cat_item = QStandardItem(display_text)
+                cat_item.setData(c.id, Qt.UserRole)
+                type_desc = "Доход" if c.type == "income" else "Расход"
+                type_item = QStandardItem(type_desc)
+                color_item = QStandardItem("■■■")
+                color_item.setForeground(QColor(c.color))
+                id_item = QStandardItem(str(c.id))
 
-            name_text = c.name
-            if c.parent_id:
-                name_text = "   ↳ " + c.name
-            self.cat_table.setItem(row, 2, QTableWidgetItem(name_text))
+                parents[c.id] = cat_item
+                model.appendRow([cat_item, type_item, color_item, id_item])
 
-            type_desc = "Доход" if c.type == "income" else "Расход"
-            self.cat_table.setItem(row, 3, QTableWidgetItem(type_desc))
+        # Затем подкатегории
+        for c in cats:
+            if c.parent_id is not None:
+                display_text = f"{c.icon or ''} {c.name}".strip()
+                cat_item = QStandardItem(display_text)
+                cat_item.setData(c.id, Qt.UserRole)
+                type_desc = "Доход" if c.type == "income" else "Расход"
+                type_item = QStandardItem(type_desc)
+                color_item = QStandardItem("■■■")
+                color_item.setForeground(QColor(c.color))
+                id_item = QStandardItem(str(c.id))
 
-            color_item = QTableWidgetItem("■■■")
-            color_item.setForeground(QColor(c.color))
-            self.cat_table.setItem(row, 4, color_item)
+                parent_item = parents.get(c.parent_id)
+                if parent_item:
+                    parent_item.appendRow([cat_item, type_item, color_item, id_item])
+                else:
+                    model.appendRow([cat_item, type_item, color_item, id_item])
+
+        proxy = QSortFilterProxyModel()
+        proxy.setSourceModel(model)
+        proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        proxy.setRecursiveFilteringEnabled(True)
+        proxy.setFilterKeyColumn(0) # Ищем по названию
+
+        self.cat_proxy = proxy
+        self.cat_proxy.setFilterFixedString(self.cat_search.text())
+        self.cat_tree.setModel(proxy)
+
+        self.cat_tree.header().setSectionResizeMode(QHeaderView.Interactive)
+        self.cat_tree.setColumnWidth(0, 450)
+        self.cat_tree.setColumnWidth(1, 150)
+        self.cat_tree.setColumnWidth(2, 100)
+        self.cat_tree.setColumnWidth(3, 50)
+        self.cat_tree.setColumnHidden(3, True)
+
+        self.cat_tree.expandAll()
+
+    def filter_categories(self, text):
+        if self.cat_proxy:
+            self.cat_proxy.setFilterFixedString(text)
+        self.cat_tree.expandAll()
 
     def add_category(self):
         dialog = CategoryDialog(self.db, parent=self)
@@ -371,13 +420,13 @@ class SettingsPage(QWidget):
             self.refresh_categories()
             self.data_changed.emit()
 
-    def edit_category(self):
-        row = self.cat_table.currentRow()
-        if row < 0:
+    def edit_category(self, *args):
+        selection = self.cat_tree.selectionModel().selectedRows(0)
+        if not selection:
             QMessageBox.warning(self, "Редактирование", "Выберите категорию из таблицы.")
             return
 
-        cat_id = int(self.cat_table.item(row, 0).text())
+        cat_id = int(selection[0].data(Qt.UserRole))
         cat = self.db.get_category(cat_id)
         if cat:
             # Защита от редактирования базовой дефолтной категории "Другое"
@@ -392,12 +441,12 @@ class SettingsPage(QWidget):
                 self.data_changed.emit()
 
     def delete_category(self):
-        row = self.cat_table.currentRow()
-        if row < 0:
+        selection = self.cat_tree.selectionModel().selectedRows(0)
+        if not selection:
             QMessageBox.warning(self, "Удаление", "Выберите категорию для удаления.")
             return
 
-        cat_id = int(self.cat_table.item(row, 0).text())
+        cat_id = int(selection[0].data(Qt.UserRole))
         cat = self.db.get_category(cat_id)
 
         if cat.name == "Другое":

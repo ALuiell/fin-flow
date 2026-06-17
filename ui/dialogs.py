@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import QDate, Qt
 from models import Transaction, Account, Category, Subscription
 from utils.analytics_helper import eval_expression
-from ui.custom_widgets import TagSelector
+from ui.custom_widgets import TagSelector, CategorySelectorWidget
 
 class BaseDialog(QDialog):
     def __init__(self, title: str, parent=None):
@@ -69,7 +69,7 @@ class TransactionDialog(BaseDialog):
 
         # 6. Категория
         self.category_label = QLabel("Категория:")
-        self.category_combo = QComboBox()
+        self.category_combo = CategorySelectorWidget()
         self.load_categories()
         form.addRow(self.category_label, self.category_combo)
 
@@ -126,13 +126,9 @@ class TransactionDialog(BaseDialog):
         else:
             return
 
-        # Группируем категории
-        parent_cats = [c for c in self.categories if c.parent_id is None and c.type == target_type]
-        for p_cat in parent_cats:
-            self.category_combo.addItem(f"{p_cat.icon} {p_cat.name}", p_cat.id)
-            for c_cat in self.categories:
-                if c_cat.parent_id == p_cat.id:
-                    self.category_combo.addItem(f"   ↳ {c_cat.icon} {c_cat.name}", c_cat.id)
+        for cat in self.categories:
+            if cat.type == target_type:
+                self.category_combo.addItem(cat.name, cat.id, cat.parent_id, cat.icon)
 
     def on_type_changed(self, idx):
         type_str = self.type_combo.currentText()
@@ -500,7 +496,7 @@ class SubscriptionDialog(BaseDialog):
         self.currency_combo.setCurrentText(base_curr)
         form.addRow("Валюта:", self.currency_combo)
 
-        self.category_combo = QComboBox()
+        self.category_combo = CategorySelectorWidget()
         self.load_categories()
         form.addRow("Категория расходов:", self.category_combo)
 
@@ -534,7 +530,7 @@ class SubscriptionDialog(BaseDialog):
         cats = self.db.get_categories()
         for cat in cats:
             if cat.type == "expense":
-                self.category_combo.addItem(f"{cat.icon} {cat.name}", cat.id)
+                self.category_combo.addItem(cat.name, cat.id, cat.parent_id, cat.icon)
 
     def evaluate_amount(self):
         text = self.amount_input.text().strip()

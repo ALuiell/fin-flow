@@ -97,9 +97,14 @@ class SubscriptionsPage(QWidget):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents) # ID
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents) # Статус
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(1, 200)
+        self.table.setColumnWidth(2, 120)
+        self.table.setColumnWidth(3, 150)
+        self.table.setColumnWidth(4, 150)
+        self.table.setColumnWidth(5, 120)
+        self.table.setColumnWidth(6, 120)
         layout.addWidget(self.table)
 
         self.refresh_data()

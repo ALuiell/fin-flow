@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, Signal, QDate
 from PySide6.QtGui import QColor
 from models import Transaction
 from ui.dialogs import TransactionDialog
-from ui.custom_widgets import CheckableComboBox
+from ui.custom_widgets import CheckableComboBox, CategoryFilterWidget
 from datetime import datetime
 
 class TransactionsPage(QWidget):
@@ -37,9 +37,9 @@ class TransactionsPage(QWidget):
         filter_layout.addWidget(self.search_input, stretch=2)
 
         # Фильтр категорий
-        self.cat_filter = CheckableComboBox()
-        self.cat_filter.lineEdit().setPlaceholderText("Все категории")
-        self.cat_filter.model().dataChanged.connect(self.refresh_data)
+        self.cat_filter = CategoryFilterWidget()
+        self.cat_filter.setText("Все категории")
+        self.cat_filter.dataChanged.connect(self.refresh_data)
         filter_layout.addWidget(self.cat_filter, stretch=1)
 
         # Фильтр тегов
@@ -110,10 +110,14 @@ class TransactionsPage(QWidget):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
         self.table.setSelectionMode(QTableWidget.SingleSelection)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents) # ID
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents) # Дата
-        self.table.horizontalHeader().setSectionResizeMode(6, QHeaderView.ResizeToContents) # Сумма
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        self.table.setColumnWidth(0, 50)  # ID
+        self.table.setColumnWidth(1, 100) # Дата
+        self.table.setColumnWidth(2, 170) # Категория
+        self.table.setColumnWidth(3, 130) # Счет
+        self.table.setColumnWidth(4, 240) # Описание
+        self.table.setColumnWidth(5, 120) # Теги
+        self.table.setColumnWidth(6, 120) # Сумма
         layout.addWidget(self.table)
 
         # Интерактивность
@@ -130,7 +134,7 @@ class TransactionsPage(QWidget):
     def load_filters(self):
         # Отключаем сигналы временно
         try:
-            self.cat_filter.model().dataChanged.disconnect(self.refresh_data)
+            self.cat_filter.dataChanged.disconnect(self.refresh_data)
             self.tag_filter.model().dataChanged.disconnect(self.refresh_data)
         except:
             pass
@@ -138,12 +142,8 @@ class TransactionsPage(QWidget):
 
         self.cat_filter.clear()
         categories = self.db.get_categories()
-        parents = [c for c in categories if c.parent_id is None]
-        for p in parents:
-            self.cat_filter.addItem(f"{p.icon} {p.name}", p.id)
-            children = [c for c in categories if c.parent_id == p.id]
-            for c in children:
-                self.cat_filter.addItem(f"   ↳ {c.icon} {c.name}", c.id)
+        for cat in categories:
+            self.cat_filter.addItem(cat.name, cat.id, cat.parent_id, cat.icon)
 
         self.tag_filter.clear()
         tags = self.db.get_all_tags()
@@ -155,7 +155,7 @@ class TransactionsPage(QWidget):
         for acc in self.db.get_accounts():
             self.acc_filter.addItem(acc.name, acc.id)
 
-        self.cat_filter.model().dataChanged.connect(self.refresh_data)
+        self.cat_filter.dataChanged.connect(self.refresh_data)
         self.tag_filter.model().dataChanged.connect(self.refresh_data)
         self.acc_filter.blockSignals(False)
 
@@ -239,7 +239,7 @@ class TransactionsPage(QWidget):
             self.refresh_data()
             self.data_changed.emit()
 
-    def edit_transaction(self):
+    def edit_transaction(self, *args):
         row = self.table.currentRow()
         if row < 0:
             QMessageBox.warning(self, "Редактирование", "Выберите транзакцию из таблицы.")
