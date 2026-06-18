@@ -8,7 +8,15 @@ from models import Account, Category, Transaction, Budget, Goal, Subscription
 class DBManager:
     def __init__(self, db_path: str = "finflow.db"):
         self.db_path = db_path
+        self._revision = 0
         self.init_db()
+
+    @property
+    def revision(self) -> int:
+        return self._revision
+
+    def _mark_changed(self):
+        self._revision += 1
 
     @contextlib.contextmanager
     def _get_connection(self):
@@ -58,6 +66,24 @@ class DBManager:
                         "INSERT INTO categories (name, type, icon, color, parent_id) VALUES (?, ?, ?, ?, ?)",
                         (sub_name, parent['type'], sub_icon, parent['color'], parent['id'])
                     )
+
+    def _split_tags(self, tags_str: Optional[str]) -> List[str]:
+        if not tags_str:
+            return []
+
+        seen = set()
+        tags = []
+        for tag in tags_str.split(','):
+            tag_clean = tag.strip().lstrip("#").strip()
+            if tag_clean and tag_clean.lower() not in seen:
+                seen.add(tag_clean.lower())
+                tags.append(tag_clean)
+        return tags
+
+    def _ensure_tags_from_transactions(self, cursor):
+        cursor.execute("SELECT id, tags FROM transactions WHERE tags IS NOT NULL AND tags != ''")
+        for row in cursor.fetchall():
+            self._sync_transaction_tags(cursor, row['id'], row['tags'])
 
     def init_db(self):
         """Создает таблицы и инициализирует дефолтные значения, если база пустая."""
@@ -169,6 +195,25 @@ class DBManager:
             )
             """)
 
+            # 9. Справочник тегов. Старые теги автоматически мигрируются из transactions.tags.
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE
+            )
+            """)
+
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transaction_tags (
+                transaction_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                PRIMARY KEY (transaction_id, tag_id),
+                FOREIGN KEY(transaction_id) REFERENCES transactions(id) ON DELETE CASCADE,
+                FOREIGN KEY(tag_id) REFERENCES tags(id) ON DELETE CASCADE
+            )
+            """)
+            self._ensure_tags_from_transactions(cursor)
+
             # Заполнение настроек по умолчанию
             cursor.execute("SELECT COUNT(*) FROM settings")
             if cursor.fetchone()[0] == 0:
@@ -226,6 +271,7 @@ class DBManager:
         with self._get_connection() as conn:
             conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, str(value)))
             conn.commit()
+            self._mark_changed()
 
     # --- РАБОТА С КУРСАМИ ВАЛЮТ ---
     def get_rates(self) -> Dict[str, float]:
@@ -239,6 +285,7 @@ class DBManager:
             conn.execute("INSERT OR REPLACE INTO currency_rates (code, rate_to_usd, last_updated) VALUES (?, ?, ?)",
                          (code.upper(), rate_to_usd, datetime.now().isoformat()))
             conn.commit()
+            self._mark_changed()
 
     def convert_amount(self, amount: float, from_curr: str, to_curr: str) -> float:
         if from_curr == to_curr:
@@ -259,6 +306,7 @@ class DBManager:
             cursor.execute("INSERT INTO accounts (name, balance, currency, color) VALUES (?, ?, ?, ?)",
                            (name, balance, currency, color))
             conn.commit()
+            self._mark_changed()
             return cursor.lastrowid
 
     def get_accounts(self) -> List[Account]:
@@ -279,12 +327,14 @@ class DBManager:
             conn.execute("UPDATE accounts SET name = ?, balance = ?, currency = ?, color = ? WHERE id = ?",
                          (account.name, account.balance, account.currency, account.color, account.id))
             conn.commit()
+            self._mark_changed()
             return True
 
     def delete_account(self, account_id: int) -> bool:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
             conn.commit()
+            self._mark_changed()
             return True
 
     # --- РАБОТА С КАТЕГОРИЯМИ (CATEGORIES) ---
@@ -294,6 +344,7 @@ class DBManager:
             cursor.execute("INSERT INTO categories (name, type, icon, color, parent_id) VALUES (?, ?, ?, ?, ?)",
                            (name, type_, icon, color, parent_id))
             conn.commit()
+            self._mark_changed()
             return cursor.lastrowid
 
     def get_categories(self) -> List[Category]:
@@ -314,6 +365,7 @@ class DBManager:
             conn.execute("UPDATE categories SET name = ?, type = ?, icon = ?, color = ?, parent_id = ? WHERE id = ?",
                          (category.name, category.type, category.icon, category.color, category.parent_id, category.id))
             conn.commit()
+            self._mark_changed()
             return True
 
     def delete_category(self, category_id: int) -> bool:
@@ -331,6 +383,7 @@ class DBManager:
 
             conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
             conn.commit()
+            self._mark_changed()
             return True
 
     # --- РАБОТА С ТРАНЗАКЦИЯМИ (TRANSACTIONS) ---
@@ -344,6 +397,7 @@ class DBManager:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (t.amount, t.currency, t.category_id, t.account_id, t.transfer_to_account_id, t.date, t.description, t.tags))
             t_id = cursor.lastrowid
+            self._sync_transaction_tags(cursor, t_id, t.tags)
 
             # Обновляем балансы счетов
             if t.transfer_to_account_id:
@@ -372,19 +426,47 @@ class DBManager:
                     cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount_acc, t.account_id))
 
             conn.commit()
+            self._mark_changed()
             return t_id
+
+    def _ensure_tags_from_string(self, cursor, tags_str: Optional[str]):
+        for tag_clean in self._split_tags(tags_str):
+            cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag_clean,))
+
+    def _sync_transaction_tags(self, cursor, transaction_id: int, tags_str: Optional[str]):
+        cursor.execute("DELETE FROM transaction_tags WHERE transaction_id = ?", (transaction_id,))
+        for tag_clean in self._split_tags(tags_str):
+            cursor.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag_clean,))
+            cursor.execute("SELECT id FROM tags WHERE name = ?", (tag_clean,))
+            tag_row = cursor.fetchone()
+            if tag_row:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO transaction_tags (transaction_id, tag_id) VALUES (?, ?)",
+                    (transaction_id, tag_row['id'])
+                )
+
+    def add_tag(self, name: str) -> bool:
+        tag_clean = name.strip().lstrip("#").strip()
+        if not tag_clean:
+            return False
+        with self._get_connection() as conn:
+            conn.execute("INSERT OR IGNORE INTO tags (name) VALUES (?)", (tag_clean,))
+            conn.commit()
+            self._mark_changed()
+            return True
+
+    def add_tags_from_string(self, tags_str: Optional[str]) -> None:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            self._ensure_tags_from_string(cursor, tags_str)
+            conn.commit()
+            self._mark_changed()
 
     def get_all_tags(self) -> List[str]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT tags FROM transactions WHERE tags IS NOT NULL AND tags != ''")
-            all_tags = set()
-            for row in cursor.fetchall():
-                for t in row['tags'].split(','):
-                    t_clean = t.strip()
-                    if t_clean:
-                        all_tags.add(t_clean)
-            return sorted(list(all_tags))
+            cursor.execute("SELECT name FROM tags ORDER BY name COLLATE NOCASE")
+            return [row['name'] for row in cursor.fetchall()]
 
     def get_transactions(self, start_date: Optional[str] = None, end_date: Optional[str] = None,
                          category_id: Optional[int] = None, category_ids: Optional[List[int]] = None,
@@ -394,7 +476,7 @@ class DBManager:
             cursor = conn.cursor()
             query = """
             SELECT t.id, t.amount, t.currency, t.category_id, t.account_id, t.transfer_to_account_id,
-                   t.date, t.description, t.tags,
+                   t.date, t.description, COALESCE(GROUP_CONCAT(tg.name, ', '), t.tags, '') as tags,
                    c.name as category_name, c.icon as category_icon, c.color as category_color, c.type as category_type,
                    a.name as account_name, a.color as account_color,
                    a2.name as transfer_account_name, a2.color as transfer_account_color
@@ -402,6 +484,8 @@ class DBManager:
             LEFT JOIN categories c ON t.category_id = c.id
             LEFT JOIN accounts a ON t.account_id = a.id
             LEFT JOIN accounts a2 ON t.transfer_to_account_id = a2.id
+            LEFT JOIN transaction_tags tt ON tt.transaction_id = t.id
+            LEFT JOIN tags tg ON tg.id = tt.tag_id
             WHERE 1=1
             """
             params = []
@@ -429,11 +513,20 @@ class DBManager:
 
             t_list = tags or ([tag] if tag else [])
             if t_list:
-                tag_conditions = " OR ".join(["t.tags LIKE ?"] * len(t_list))
-                query += f" AND ({tag_conditions})"
+                placeholders = ','.join('?' * len(t_list))
+                query += f"""
+                AND EXISTS (
+                    SELECT 1
+                    FROM transaction_tags filter_tt
+                    JOIN tags filter_tg ON filter_tg.id = filter_tt.tag_id
+                    WHERE filter_tt.transaction_id = t.id
+                    AND filter_tg.name IN ({placeholders})
+                )
+                """
                 for t_item in t_list:
-                    params.append(f"%{t_item}%")
+                    params.append(t_item)
 
+            query += " GROUP BY t.id"
             query += " ORDER BY t.date DESC, t.id DESC"
             cursor.execute(query, params)
             return [dict(r) for r in cursor.fetchall()]
@@ -477,6 +570,7 @@ class DBManager:
 
             cursor.execute("DELETE FROM transactions WHERE id = ?", (t_id,))
             conn.commit()
+            self._mark_changed()
             return True
 
     # --- РАБОТА С БЮДЖЕТАМИ (BUDGETS) ---
@@ -487,6 +581,7 @@ class DBManager:
             VALUES (?, ?, ?, ?)
             """, (category_id, amount_limit, currency, month))
             conn.commit()
+            self._mark_changed()
             return True
 
     def get_budgets(self, month: str) -> List[Dict[str, Any]]:
@@ -522,6 +617,7 @@ class DBManager:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM budgets WHERE id = ?", (budget_id,))
             conn.commit()
+            self._mark_changed()
             return True
 
     # --- РАБОТА С ЦЕЛЯМИ (GOALS) ---
@@ -531,6 +627,7 @@ class DBManager:
             cursor.execute("INSERT INTO goals (name, target_amount, current_amount, currency, deadline) VALUES (?, ?, 0, ?, ?)",
                            (name, target_amount, currency, deadline))
             conn.commit()
+            self._mark_changed()
             return cursor.lastrowid
 
     def get_goals(self) -> List[Goal]:
@@ -545,12 +642,14 @@ class DBManager:
             conn.execute("UPDATE goals SET name = ?, target_amount = ?, current_amount = ?, currency = ?, deadline = ?, status = ? WHERE id = ?",
                          (goal.name, goal.target_amount, goal.current_amount, goal.currency, goal.deadline, goal.status, goal.id))
             conn.commit()
+            self._mark_changed()
             return True
 
     def delete_goal(self, goal_id: int) -> bool:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
             conn.commit()
+            self._mark_changed()
             return True
 
     # --- РАБОТА С ПОДПИСКАМИ (SUBSCRIPTIONS) ---
@@ -562,6 +661,7 @@ class DBManager:
             VALUES (?, ?, ?, ?, ?, ?, 1)
             """, (name, amount, currency, category_id, period, next_payment_date))
             conn.commit()
+            self._mark_changed()
             return cursor.lastrowid
 
     def get_subscriptions(self) -> List[Dict[str, Any]]:
@@ -582,10 +682,12 @@ class DBManager:
             WHERE id = ?
             """, (s.name, s.amount, s.currency, s.category_id, s.period, s.next_payment_date, s.is_active, s.id))
             conn.commit()
+            self._mark_changed()
             return True
 
     def delete_subscription(self, sub_id: int) -> bool:
         with self._get_connection() as conn:
             conn.execute("DELETE FROM subscriptions WHERE id = ?", (sub_id,))
             conn.commit()
+            self._mark_changed()
             return True

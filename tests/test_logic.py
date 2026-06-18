@@ -3,7 +3,14 @@ import os
 import tempfile
 from database.db_manager import DBManager
 from models import Transaction, Account, Category
-from utils.analytics_helper import eval_expression, calculate_safe_to_spend
+from utils.analytics_helper import (
+    eval_expression,
+    calculate_safe_to_spend,
+    get_period_bounds,
+    build_cumulative_spend_series,
+    sort_transactions_by_selected_subcategories,
+)
+from datetime import date
 
 class TestFinFlowLogic(unittest.TestCase):
     def setUp(self):
@@ -118,6 +125,142 @@ class TestFinFlowLogic(unittest.TestCase):
 
         self.assertEqual(updated_acc1.balance, acc1.balance + 300.0)
         self.assertEqual(updated_acc2.balance, acc2.balance - 300.0)
+
+    def test_analytics_period_bounds(self):
+        selected = date(2026, 6, 18)
+
+        self.assertEqual(get_period_bounds(selected, "day"), ("2026-06-18", "2026-06-18"))
+        self.assertEqual(get_period_bounds(selected, "month"), ("2026-06-01", "2026-06-30"))
+
+    def test_cumulative_spend_series_includes_full_month_and_subscriptions(self):
+        transactions = [
+            {
+                "amount": 10.0,
+                "currency": "USD",
+                "date": "2026-06-01",
+                "category_type": "expense",
+                "transfer_to_account_id": None,
+            },
+            {
+                "amount": 5.0,
+                "currency": "USD",
+                "date": "2026-06-03",
+                "category_type": "expense",
+                "transfer_to_account_id": None,
+            },
+            {
+                "amount": 99.0,
+                "currency": "USD",
+                "date": "2026-06-04",
+                "category_type": "income",
+                "transfer_to_account_id": None,
+            },
+        ]
+        subscriptions = [
+            {
+                "amount": 20.0,
+                "currency": "USD",
+                "next_payment_date": "2026-06-05",
+                "is_active": 1,
+            },
+            {
+                "amount": 50.0,
+                "currency": "USD",
+                "next_payment_date": "2026-06-10",
+                "is_active": 0,
+            },
+        ]
+
+        series = build_cumulative_spend_series(
+            transactions,
+            subscriptions,
+            2026,
+            6,
+            300.0,
+            lambda amount, _from, _to: amount,
+            "USD",
+            today=date(2026, 6, 18),
+        )
+
+        self.assertEqual(len(series["days"]), 30)
+        self.assertEqual(series["actual_spend"][0], 10.0)
+        self.assertEqual(series["actual_spend"][2], 15.0)
+        self.assertEqual(series["actual_spend"][17], 15.0)
+        self.assertIsNone(series["actual_spend"][18])
+        self.assertEqual(series["ideal_spend"][-1], 300.0)
+        self.assertEqual(series["planned_spend"][3], 0.0)
+        self.assertEqual(series["planned_spend"][4], 20.0)
+        self.assertEqual(series["planned_spend"][-1], 20.0)
+
+    def test_selected_subcategory_transactions_are_sorted_first(self):
+        transactions = [
+            {"id": 1, "category_id": 10},
+            {"id": 2, "category_id": 20},
+            {"id": 3, "category_id": 10},
+        ]
+
+        sorted_txs = sort_transactions_by_selected_subcategories(transactions, [20])
+        self.assertEqual([t["id"] for t in sorted_txs], [2, 1, 3])
+
+    def test_tags_migrate_from_existing_transactions(self):
+        cat_id = self.db.add_category("Тест теги", "expense", "🏷️", "#9E9E9E")
+        acc = self.db.get_accounts()[0]
+        self.db.add_transaction(Transaction(
+            id=None,
+            amount=10.0,
+            currency="USD",
+            category_id=cat_id,
+            account_id=acc.id,
+            transfer_to_account_id=None,
+            date="2026-06-18",
+            description="Тест",
+            tags="alpha, beta"
+        ))
+
+        with self.db._get_connection() as conn:
+            conn.execute("DELETE FROM tags")
+            conn.commit()
+
+        DBManager(self.db_path)
+        self.assertEqual(self.db.get_all_tags(), ["alpha", "beta"])
+        filtered = self.db.get_transactions(tags=["alpha"])
+        self.assertEqual(len(filtered), 1)
+        self.assertEqual(filtered[0]["tags"], "alpha, beta")
+
+    def test_standalone_tag_can_be_created(self):
+        before = self.db.revision
+        self.db.add_tag("future")
+        self.assertIn("future", self.db.get_all_tags())
+        self.assertGreater(self.db.revision, before)
+
+    def test_transaction_tags_are_stored_in_link_table(self):
+        cat_id = self.db.add_category("Тест связь тегов", "expense", "🏷️", "#9E9E9E")
+        acc = self.db.get_accounts()[0]
+        tx_id = self.db.add_transaction(Transaction(
+            id=None,
+            amount=15.0,
+            currency="USD",
+            category_id=cat_id,
+            account_id=acc.id,
+            transfer_to_account_id=None,
+            date="2026-06-18",
+            description="Связь",
+            tags="alpha, beta"
+        ))
+
+        with self.db._get_connection() as conn:
+            rows = conn.execute("""
+                SELECT tg.name
+                FROM transaction_tags tt
+                JOIN tags tg ON tg.id = tt.tag_id
+                WHERE tt.transaction_id = ?
+                ORDER BY tg.name
+            """, (tx_id,)).fetchall()
+
+        self.assertEqual([row["name"] for row in rows], ["alpha", "beta"])
+        filtered = self.db.get_transactions(tags=["alpha"])
+        self.assertEqual([t["id"] for t in filtered], [tx_id])
+        self.assertEqual(filtered[0]["tags"], "alpha, beta")
 
 if __name__ == '__main__':
     unittest.main()

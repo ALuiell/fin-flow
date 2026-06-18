@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         sidebar_layout.addStretch()
         
         # Автор или статус в самом низу
-        status_lbl = QLabel("v1.0.0 (Local)")
+        status_lbl = QLabel("v1.0.1 (Local)")
         status_lbl.setStyleSheet("color: #555555; padding: 10px; font-size: 11px;")
         status_lbl.setAlignment(Qt.AlignCenter)
         sidebar_layout.addWidget(status_lbl)
@@ -119,21 +119,18 @@ class MainWindow(QMainWindow):
             
         # Обновляем данные на открываемой странице
         widget = self.pages_container.widget(page_index)
+        if widget is self.transactions_page:
+            widget.load_filters()
         if hasattr(widget, "refresh_data"):
             widget.refresh_data()
 
     def refresh_all_pages(self):
-        # Обновляем все страницы в фоне
-        self.dashboard_page.refresh_data()
-        self.transactions_page.refresh_data()
-        self.calendar_page.refresh_data()
-        self.analytics_page.refresh_data()
-        self.subscriptions_page.refresh_data()
-        self.budgets_page.refresh_data()
-        self.settings_page.refresh_data()
-        
-        # Обновляем фильтры (например, если изменились счета/категории)
-        self.transactions_page.load_filters()
+        # Тяжелые страницы обновляем лениво: текущая сразу, остальные при открытии.
+        current_widget = self.pages_container.currentWidget()
+        if current_widget is self.transactions_page:
+            self.transactions_page.load_filters()
+        if hasattr(current_widget, "refresh_data"):
+            current_widget.refresh_data()
 
     def init_shortcuts(self):
         # Ctrl + N — быстрое создание транзакции

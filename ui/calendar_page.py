@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QCalendarWidget, QTableWidget, QTableWidgetItem, 
                              QHeaderView, QFrame)
 from PySide6.QtCore import Qt, QDate, QRect, Signal
-from PySide6.QtGui import QPainter, QColor, QFont
+from PySide6.QtGui import QPainter, QColor, QFont, QTextCharFormat
 from database.db_manager import DBManager
 from datetime import datetime, date
 
@@ -18,6 +18,15 @@ class ExpenseCalendar(QCalendarWidget):
         
         # Первичный запуск
         self.load_month_expenses(self.yearShown(), self.monthShown())
+        self.setStyleSheet("QCalendarWidget QAbstractItemView { font-size: 14px; }")
+        self._apply_weekend_format()
+
+    def _apply_weekend_format(self):
+        weekend_format = QTextCharFormat()
+        weekend_format.setForeground(QColor("#FF5252"))
+        weekend_format.setFontPointSize(10)
+        self.setWeekdayTextFormat(Qt.Saturday, weekend_format)
+        self.setWeekdayTextFormat(Qt.Sunday, weekend_format)
 
     def load_month_expenses(self, year: int, month: int):
         self.expense_cache.clear()
@@ -60,12 +69,12 @@ class ExpenseCalendar(QCalendarWidget):
                 painter.setPen(QColor("#FF4D4D"))
                 
                 font = painter.font()
-                font.setPointSize(7)
+                font.setPointSize(8)
                 font.setBold(True)
                 painter.setFont(font)
                 
                 # Рисуем подпись суммы расходов внизу ячейки
-                text_rect = QRect(rect.x(), rect.y() + rect.height() - 14, rect.width(), 12)
+                text_rect = QRect(rect.x(), rect.y() + rect.height() - 17, rect.width(), 15)
                 
                 # Форматируем сумму для экономии места
                 if spent >= 1000:

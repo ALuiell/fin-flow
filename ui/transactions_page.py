@@ -2,12 +2,13 @@ import csv
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
                              QPushButton, QTableWidget, QTableWidgetItem,
                              QHeaderView, QLineEdit, QComboBox, QDateEdit,
-                             QFileDialog, QMessageBox)
+                             QFileDialog, QMessageBox, QFrame)
 from PySide6.QtCore import Qt, Signal, QDate
 from PySide6.QtGui import QColor
 from models import Transaction
 from ui.dialogs import TransactionDialog
-from ui.custom_widgets import CheckableComboBox, CategoryFilterWidget
+from ui.custom_widgets import CategoryFilterWidget, TagFilterWidget
+from utils.analytics_helper import sort_transactions_by_selected_subcategories
 from datetime import datetime
 
 class TransactionsPage(QWidget):
@@ -24,7 +25,7 @@ class TransactionsPage(QWidget):
         layout.setSpacing(15)
 
         # 1. Панель фильтров
-        filter_card = QFrame = QWidget()
+        filter_card = QFrame()
         filter_card.setStyleSheet("background-color: #1E1E1E; border-radius: 8px; padding: 10px;")
         filter_layout = QHBoxLayout(filter_card)
         filter_layout.setContentsMargins(10, 10, 10, 10)
@@ -43,9 +44,8 @@ class TransactionsPage(QWidget):
         filter_layout.addWidget(self.cat_filter, stretch=1)
 
         # Фильтр тегов
-        self.tag_filter = CheckableComboBox()
-        self.tag_filter.lineEdit().setPlaceholderText("Все теги")
-        self.tag_filter.model().dataChanged.connect(self.refresh_data)
+        self.tag_filter = TagFilterWidget(self.db)
+        self.tag_filter.dataChanged.connect(self.refresh_data)
         filter_layout.addWidget(self.tag_filter, stretch=1)
 
         # Фильтр счетов
@@ -135,7 +135,7 @@ class TransactionsPage(QWidget):
         # Отключаем сигналы временно
         try:
             self.cat_filter.dataChanged.disconnect(self.refresh_data)
-            self.tag_filter.model().dataChanged.disconnect(self.refresh_data)
+            self.tag_filter.dataChanged.disconnect(self.refresh_data)
         except:
             pass
         self.acc_filter.blockSignals(True)
@@ -145,10 +145,7 @@ class TransactionsPage(QWidget):
         for cat in categories:
             self.cat_filter.addItem(cat.name, cat.id, cat.parent_id, cat.icon)
 
-        self.tag_filter.clear()
-        tags = self.db.get_all_tags()
-        for t in tags:
-            self.tag_filter.addItem(f"#{t}", t)
+        self.tag_filter.refresh_tags()
 
         self.acc_filter.clear()
         self.acc_filter.addItem("Все счета", 0)
@@ -156,12 +153,13 @@ class TransactionsPage(QWidget):
             self.acc_filter.addItem(acc.name, acc.id)
 
         self.cat_filter.dataChanged.connect(self.refresh_data)
-        self.tag_filter.model().dataChanged.connect(self.refresh_data)
+        self.tag_filter.dataChanged.connect(self.refresh_data)
         self.acc_filter.blockSignals(False)
 
     def refresh_data(self, *args, **kwargs):
         search = self.search_input.text().strip()
         cat_ids = self.cat_filter.currentData()
+        selected_subcategory_ids = self.cat_filter.currentSubcategoryData()
         tag_list = self.tag_filter.currentData()
         acc_id = self.acc_filter.currentData()
         start = self.date_start.date().toString("yyyy-MM-dd")
@@ -186,6 +184,8 @@ class TransactionsPage(QWidget):
         # Дополнительная ручная фильтрация по описанию, если поиск не по тегам
         if search_param:
             txs = [t for t in txs if search_param.lower() in (t['description'] or '').lower() or search_param.lower() in (t['category_name'] or '').lower()]
+
+        txs = sort_transactions_by_selected_subcategories(txs, selected_subcategory_ids)
 
         self.table.setRowCount(len(txs))
 
@@ -232,6 +232,13 @@ class TransactionsPage(QWidget):
 
             amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(row_idx, 6, amount_item)
+
+            if selected_subcategory_ids and t['category_id'] in selected_subcategory_ids:
+                highlight = QColor(138, 43, 226, 38)
+                for col in range(self.table.columnCount()):
+                    item = self.table.item(row_idx, col)
+                    if item:
+                        item.setBackground(highlight)
 
     def add_transaction(self):
         dialog = TransactionDialog(self.db, parent=self)
