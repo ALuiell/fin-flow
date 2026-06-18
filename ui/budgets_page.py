@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from database.db_manager import DBManager
+from utils.formatting import format_money
 from datetime import date
 
 class BudgetsPage(QWidget):
@@ -19,12 +20,12 @@ class BudgetsPage(QWidget):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
 
-        # Заголовок
+        # Header
         header = QLabel("Месячные лимиты по категориям трат")
         header.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFFFFF;")
         main_layout.addWidget(header)
 
-        # Прокручиваемая область с карточками категорий
+        # Scrollable area with category cards
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
@@ -39,7 +40,7 @@ class BudgetsPage(QWidget):
         self.refresh_data()
 
     def refresh_data(self):
-        # Очищаем сетку
+        # Clear grid
         while self.grid.count():
             item = self.grid.takeAt(0)
             widget = item.widget()
@@ -49,12 +50,12 @@ class BudgetsPage(QWidget):
         current_month = date.today().strftime("%Y-%m")
         base_currency = self.db.get_setting("base_currency", "RUB")
         
-        # Получаем установленные бюджеты
+        # Get set budgets
         budgets_list = self.db.get_budgets(current_month)
-        # Индексируем их по category_id
+        # Index them by category_id
         budgets = {b['category_id']: b for b in budgets_list}
         
-        # Получаем все расходные категории
+        # Get all expense categories
         all_categories = self.db.get_categories()
         expense_categories = [c for c in all_categories if c.type == 'expense']
 
@@ -68,7 +69,7 @@ class BudgetsPage(QWidget):
             card_layout.setContentsMargins(15, 15, 15, 15)
             card_layout.setSpacing(10)
 
-            # Верхняя строка: Иконка, Имя
+            # Top row: Icon, Name
             top_layout = QHBoxLayout()
             icon_lbl = QLabel(cat.icon or "📁")
             icon_lbl.setStyleSheet(f"font-size: 24px; padding: 4px; background-color: rgba(255,255,255,0.05); border-radius: 6px;")
@@ -80,48 +81,48 @@ class BudgetsPage(QWidget):
             top_layout.addWidget(name_lbl)
             top_layout.addStretch()
             
-            # Кружок цвета категории
+            # Category color dot
             color_dot = QLabel("●")
             color_dot.setStyleSheet(f"color: {cat.color}; font-size: 14px;")
             top_layout.addWidget(color_dot)
             
             card_layout.addLayout(top_layout)
 
-            # Если бюджет установлен
+            # If budget is set
             if cat.id in budgets:
                 b = budgets[cat.id]
                 limit = b['amount_limit']
                 spent = b['spent']
                 
-                # Считаем процент расхода
+                # Calculate expense percentage
                 percent = int((spent / limit) * 100) if limit > 0 else 100
                 percent_clamped = min(100, percent)
                 
                 info_lbl = QLabel(f"Лимит: {limit:,.0f} {b['currency']}")
                 info_lbl.setStyleSheet("font-weight: bold; color: #A0A0A0;")
                 
-                spent_lbl = QLabel(f"Потрачено: {spent:,.2f} {b['currency']} ({percent}%)")
+                spent_lbl = QLabel(f"Потрачено: {format_money(spent, b['currency'])} ({percent}%)")
                 
-                # Прогресс-бар
+                # Progress bar
                 progress = QProgressBar()
                 progress.setValue(percent_clamped)
                 
-                # Меняем цвет прогресс-бара в зависимости от перерасхода
+                # Change progress bar color based on overspending
                 if percent >= 100:
-                    progress.setStyleSheet("QProgressBar::chunk { background-color: #F44336; }") # Красный
+                    progress.setStyleSheet("QProgressBar::chunk { background-color: #F44336; }") # Red
                     spent_lbl.setStyleSheet("color: #F44336; font-weight: 600;")
                 elif percent >= 80:
-                    progress.setStyleSheet("QProgressBar::chunk { background-color: #FF9800; }") # Оранжевый
+                    progress.setStyleSheet("QProgressBar::chunk { background-color: #FF9800; }") # Orange
                     spent_lbl.setStyleSheet("color: #FF9800;")
                 else:
-                    progress.setStyleSheet("QProgressBar::chunk { background-color: #4CAF50; }") # Зеленый
+                    progress.setStyleSheet("QProgressBar::chunk { background-color: #4CAF50; }") # Green
                     spent_lbl.setStyleSheet("color: #E0E0E0;")
                 
                 card_layout.addWidget(info_lbl)
                 card_layout.addWidget(progress)
                 card_layout.addWidget(spent_lbl)
 
-                # Кнопки редактирования/удаления
+                # Edit/Delete buttons
                 btn_lay = QHBoxLayout()
                 edit_btn = QPushButton("Изменить лимит")
                 edit_btn.setObjectName("SecondaryButton")
@@ -136,7 +137,7 @@ class BudgetsPage(QWidget):
                 btn_lay.addWidget(del_btn, stretch=1)
                 card_layout.addLayout(btn_lay)
             else:
-                # Бюджет не установлен
+                # Budget not set
                 no_budget_lbl = QLabel("Лимит не установлен")
                 no_budget_lbl.setStyleSheet("color: #666666; font-style: italic;")
                 
@@ -150,7 +151,7 @@ class BudgetsPage(QWidget):
 
             self.grid.addWidget(card, row, col)
             col += 1
-            if col > 2: # 3 карточки в ряд
+            if col > 2: # 3 cards per row
                 col = 0
                 row += 1
 

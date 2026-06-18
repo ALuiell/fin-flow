@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt, QSize
 from PySide6.QtGui import QIcon, QShortcut, QKeySequence
 from database.db_manager import DBManager
 
-# Импортируем страницы
+# Import pages
 from ui.dashboard_page import DashboardPage
 from ui.transactions_page import TransactionsPage
 from ui.calendar_page import CalendarPage
@@ -24,7 +24,7 @@ class MainWindow(QMainWindow):
         self.init_shortcuts()
 
     def init_ui(self):
-        # Главный контейнер
+        # Main container
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         
@@ -32,21 +32,21 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 1. Левый сайдбар
+        # 1. Left sidebar
         sidebar = QFrame()
         sidebar.setObjectName("SidebarFrame")
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 10, 0, 10)
         sidebar_layout.setSpacing(5)
 
-        # Заголовок приложения
+        # Application title
         title_lbl = QLabel("🌊 FinFlow")
         title_lbl.setObjectName("AppTitleLabel")
         title_lbl.setAlignment(Qt.AlignCenter)
         sidebar_layout.addWidget(title_lbl)
         sidebar_layout.addSpacing(20)
 
-        # Кнопки сайдбара
+        # Sidebar buttons
         self.nav_buttons = []
         menu_items = [
             ("📊 Обзор", 0),
@@ -64,14 +64,14 @@ class MainWindow(QMainWindow):
             btn.setCheckable(True)
             if index == 0:
                 btn.setChecked(True)
-            # Передаем индекс при клике
+            # Pass index on click
             btn.clicked.connect(lambda checked, idx=index: self.switch_page(idx))
             sidebar_layout.addWidget(btn)
             self.nav_buttons.append(btn)
 
         sidebar_layout.addStretch()
         
-        # Автор или статус в самом низу
+        # Author or status at the very bottom
         status_lbl = QLabel("v1.0.1 (Local)")
         status_lbl.setStyleSheet("color: #555555; padding: 10px; font-size: 11px;")
         status_lbl.setAlignment(Qt.AlignCenter)
@@ -79,10 +79,10 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(sidebar)
 
-        # 2. Правая часть - QStackedWidget с контентом
+        # 2. Right part - QStackedWidget with content
         self.pages_container = QStackedWidget()
         
-        # Создаем страницы
+        # Create pages
         self.dashboard_page = DashboardPage(self.db)
         self.transactions_page = TransactionsPage(self.db)
         self.calendar_page = CalendarPage(self.db)
@@ -91,7 +91,7 @@ class MainWindow(QMainWindow):
         self.budgets_page = BudgetsPage(self.db)
         self.settings_page = SettingsPage(self.db)
 
-        # Добавляем в стек
+        # Add to stack
         self.pages_container.addWidget(self.dashboard_page)      # 0
         self.pages_container.addWidget(self.transactions_page)   # 1
         self.pages_container.addWidget(self.calendar_page)       # 2
@@ -102,7 +102,7 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self.pages_container, stretch=1)
 
-        # Связываем сигналы изменения данных, чтобы страницы обновлялись синхронно
+        # Connect data change signals so pages update synchronously
         self.dashboard_page.data_changed.connect(self.refresh_all_pages)
         self.transactions_page.data_changed.connect(self.refresh_all_pages)
         self.calendar_page.data_changed.connect(self.refresh_all_pages)
@@ -113,11 +113,11 @@ class MainWindow(QMainWindow):
     def switch_page(self, page_index: int):
         self.pages_container.setCurrentIndex(page_index)
         
-        # Снимаем checked с остальных кнопок
+        # Uncheck other buttons
         for idx, btn in enumerate(self.nav_buttons):
             btn.setChecked(idx == page_index)
             
-        # Обновляем данные на открываемой странице
+        # Update data on the opened page
         widget = self.pages_container.widget(page_index)
         if widget is self.transactions_page:
             widget.load_filters()
@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
             widget.refresh_data()
 
     def refresh_all_pages(self):
-        # Тяжелые страницы обновляем лениво: текущая сразу, остальные при открытии.
+        # Heavy pages are updated lazily: current one immediately, others upon opening.
         current_widget = self.pages_container.currentWidget()
         if current_widget is self.transactions_page:
             self.transactions_page.load_filters()
@@ -133,11 +133,11 @@ class MainWindow(QMainWindow):
             current_widget.refresh_data()
 
     def init_shortcuts(self):
-        # Ctrl + N — быстрое создание транзакции
+        # Ctrl + N - quick transaction creation
         self.shortcut_new = QShortcut(QKeySequence("Ctrl+N"), self)
         self.shortcut_new.activated.connect(self.quick_add_transaction)
 
-        # Ctrl + 1..7 — переключение вкладок
+        # Ctrl + 1..7 - switch tabs
         for i in range(7):
             seq = QKeySequence(f"Ctrl+{i+1}")
             shortcut = QShortcut(seq, self)

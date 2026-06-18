@@ -10,11 +10,12 @@ from utils.analytics_helper import (
     build_cumulative_spend_series,
     sort_transactions_by_selected_subcategories,
 )
+from utils.formatting import format_amount, format_money
 from datetime import date
 
 class TestFinFlowLogic(unittest.TestCase):
     def setUp(self):
-        # Используем временную БД на диске для тестов
+        # Use temporary DB on disk for tests
         self.db_fd, self.db_path = tempfile.mkstemp()
         self.db = DBManager(self.db_path)
 
@@ -23,31 +24,37 @@ class TestFinFlowLogic(unittest.TestCase):
         os.unlink(self.db_path)
 
     def test_eval_expression(self):
-        # Простые тесты
+        # Simple tests
         self.assertEqual(eval_expression("100+200"), 300.0)
         self.assertEqual(eval_expression("150 * 2 - 50"), 250.0)
         self.assertEqual(eval_expression(" (10 + 20) / 2 "), 15.0)
         self.assertEqual(eval_expression("12.5 + 7.5"), 20.0)
         self.assertEqual(eval_expression(""), 0.0)
         
-        # Ошибки
+        # Errors
         with self.assertRaises(ValueError):
             eval_expression("100 + abc")
         with self.assertRaises(ValueError):
             eval_expression("100 / 0")
 
+    def test_money_formatting_hides_empty_decimals(self):
+        self.assertEqual(format_amount(1234.0), "1,234")
+        self.assertEqual(format_amount(1234.5), "1,234.5")
+        self.assertEqual(format_money(1234.0, "UAH"), "1,234 UAH")
+        self.assertEqual(format_money(1234.25, "UAH"), "1,234.25 UAH")
+
     def test_currency_conversion(self):
-        # Базовые курсы по умолчанию:
+        # Default exchange rates:
         # USD: 1.0
         # EUR: 1.08
-        # RUB: 0.011 (т.е. 1 RUB = 0.011 USD)
+        # RUB: 0.011 (i.e. 1 RUB = 0.011 USD)
         
-        # 100 USD в RUB: 100 * 1.0 / 0.011 = 9090.91 RUB
-        # Давайте проверим
+        # 100 USD in RUB: 100 * 1.0 / 0.011 = 9090.91 RUB
+        # Let's verify
         rub_amount = self.db.convert_amount(100.0, "USD", "RUB")
         self.assertAlmostEqual(rub_amount, 9090.91, places=2)
 
-        # 90.91 RUB в USD (должно быть около 1 USD)
+        # 90.91 RUB in USD (should be around 1 USD)
         usd_amount = self.db.convert_amount(90.91, "RUB", "USD")
         self.assertAlmostEqual(usd_amount, 1.0, places=2)
 
@@ -67,15 +74,15 @@ class TestFinFlowLogic(unittest.TestCase):
         self.assertEqual(len(product_children_after_reinit), 1)
 
     def test_transaction_balances(self):
-        # Создаем категорию расходов
+        # Create expense category
         cat_id = self.db.add_category("Тест Еда", "expense", "🍎", "#FF0000")
         
-        # Получаем исходные балансы
+        # Get initial balances
         accs = self.db.get_accounts()
-        acc = accs[0] # По умолчанию 'Наличные' с 200.0 USD
+        acc = accs[0] # Default 'Cash' with 200.0 USD
         initial_balance = acc.balance
         
-        # Делаем расход на 50.0 USD
+        # Make an expense of 50.0 USD
         t = Transaction(
             id=None,
             amount=50.0,
@@ -90,23 +97,23 @@ class TestFinFlowLogic(unittest.TestCase):
         t_id = self.db.add_transaction(t)
         self.assertIsNotNone(t_id)
 
-        # Проверяем, что баланс счета уменьшился на 50
+        # Verify that the account balance decreased by 50
         updated_acc = self.db.get_account(acc.id)
         self.assertEqual(updated_acc.balance, initial_balance - 50.0)
 
-        # Удаляем транзакцию
+        # Delete the transaction
         self.db.delete_transaction(t_id)
 
-        # Проверяем, что баланс вернулся
+        # Verify that the balance returned to initial
         restored_acc = self.db.get_account(acc.id)
         self.assertEqual(restored_acc.balance, initial_balance)
 
     def test_internal_transfer(self):
         accs = self.db.get_accounts()
-        acc1 = accs[0] # Наличные (200.0 USD)
-        acc2 = accs[1] # Основная карта (1500.0 USD)
+        acc1 = accs[0] # Cash (200.0 USD)
+        acc2 = accs[1] # Main card (1500.0 USD)
         
-        # Переводим 300.0 USD с Основная карта (acc2) на Наличные (acc1)
+        # Transfer 300.0 USD from Main card (acc2) to Cash (acc1)
         t = Transaction(
             id=None,
             amount=300.0,

@@ -12,6 +12,7 @@ from utils.analytics_helper import (
     get_period_bounds,
     build_cumulative_spend_series,
 )
+from utils.formatting import format_money
 
 
 class AnalyticsPage(QWidget):
@@ -105,7 +106,7 @@ class AnalyticsPage(QWidget):
         self.prog_title = QLabel("Прогноз трат на конец месяца")
         self.prog_title.setObjectName("CardTitle")
         self.prog_title.setWordWrap(True)
-        self.prog_value = QLabel("0.00 RUB")
+        self.prog_value = QLabel("0 RUB")
         self.prog_value.setObjectName("CardValue")
         self.prog_value.setWordWrap(True)
         self.prog_desc = QLabel("На основе темпа за этот месяц")
@@ -126,7 +127,7 @@ class AnalyticsPage(QWidget):
         self.avg_title = QLabel("Средний чек покупки")
         self.avg_title.setObjectName("CardTitle")
         self.avg_title.setWordWrap(True)
-        self.avg_value = QLabel("0.00 RUB")
+        self.avg_value = QLabel("0 RUB")
         self.avg_value.setObjectName("CardValue")
         self.avg_value.setWordWrap(True)
         self.avg_desc = QLabel("Всего трат: 0 шт.")
@@ -151,7 +152,7 @@ class AnalyticsPage(QWidget):
         self.day_value.setObjectName("CardValue")
         self.day_value.setWordWrap(True)
         self.day_value.setStyleSheet("color: #FF5252;")
-        self.day_desc = QLabel("0.00 RUB")
+        self.day_desc = QLabel("0 RUB")
         self.day_desc.setWordWrap(True)
         self.day_desc.setStyleSheet("color: #888888; font-size: 11px;")
         layout.addWidget(self.day_title)
@@ -228,14 +229,14 @@ class AnalyticsPage(QWidget):
     def _update_cards(self, summary, base_currency, selected_date, mode):
         if mode == "day":
             self.prog_title.setText("Траты за выбранный день")
-            self.prog_value.setText(f"{summary['total_expense']:,.2f} {base_currency}")
+            self.prog_value.setText(format_money(summary['total_expense'], base_currency))
             self.prog_desc.setText(selected_date.strftime("%d.%m.%Y"))
             self.prog_desc.setStyleSheet("color: #888888; font-size: 11px;")
             self.avg_desc.setText(f"Всего трат за день: {summary['transaction_count']} шт.")
             self.day_title.setText("День недели")
         else:
             self.prog_title.setText("Прогноз трат на конец месяца")
-            self.prog_value.setText(f"{summary['projected_expense']:,.2f} {base_currency}")
+            self.prog_value.setText(format_money(summary['projected_expense'], base_currency))
             diff = summary['diff_percent']
             if diff > 0:
                 self.prog_desc.setText(f"📈 На {diff}% БОЛЬШЕ трат, чем в прошлом месяце")
@@ -249,9 +250,9 @@ class AnalyticsPage(QWidget):
             self.avg_desc.setText(f"Всего трат за месяц: {summary['transaction_count']} шт.")
             self.day_title.setText("Пиковый день трат")
 
-        self.avg_value.setText(f"{summary['avg_check']:,.2f} {base_currency}")
+        self.avg_value.setText(format_money(summary['avg_check'], base_currency))
         self.day_value.setText(summary['top_weekday'])
-        self.day_desc.setText(f"Потрачено: {summary['top_weekday_sum']:,.2f} {base_currency}")
+        self.day_desc.setText(f"Потрачено: {format_money(summary['top_weekday_sum'], base_currency)}")
 
     def draw_pie_chart(self, base_currency, txs):
         cat_sums = {}

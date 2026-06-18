@@ -86,11 +86,11 @@ class DBManager:
             self._sync_transaction_tags(cursor, row['id'], row['tags'])
 
     def init_db(self):
-        """Создает таблицы и инициализирует дефолтные значения, если база пустая."""
+        """Creates tables and initializes default values if the database is empty."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # 1. Таблица настроек
+            # 1. Settings table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -98,7 +98,7 @@ class DBManager:
             )
             """)
 
-            # 2. Таблица курсов валют к USD (1 ед. валюты = X USD)
+            # 2. Currency exchange rates to USD (1 unit of currency = X USD)
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS currency_rates (
                 code TEXT PRIMARY KEY,
@@ -107,7 +107,7 @@ class DBManager:
             )
             """)
 
-            # 3. Таблица счетов
+            # 3. Accounts table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS accounts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,7 +118,7 @@ class DBManager:
             )
             """)
 
-            # 4. Таблица категорий
+            # 4. Categories table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS categories (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,13 +131,13 @@ class DBManager:
             )
             """)
 
-            # Проверка наличия колонки parent_id в таблице categories (Миграция)
+            # Check for parent_id column in categories table (Migration)
             cursor.execute("PRAGMA table_info(categories)")
             columns = [col['name'] for col in cursor.fetchall()]
             if 'parent_id' not in columns:
                 cursor.execute("ALTER TABLE categories ADD COLUMN parent_id INTEGER REFERENCES categories(id) ON DELETE CASCADE")
 
-            # 5. Таблица транзакций
+            # 5. Transactions table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS transactions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,7 +155,7 @@ class DBManager:
             )
             """)
 
-            # 6. Таблица бюджетов
+            # 6. Budgets table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS budgets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -167,7 +167,7 @@ class DBManager:
             )
             """)
 
-            # 7. Таблица целей накопления
+            # 7. Savings goals table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS goals (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,7 +180,7 @@ class DBManager:
             )
             """)
 
-            # 8. Таблица подписок
+            # 8. Subscriptions table
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -195,7 +195,7 @@ class DBManager:
             )
             """)
 
-            # 9. Справочник тегов. Старые теги автоматически мигрируются из transactions.tags.
+            # 9. Tags directory. Old tags are automatically migrated from transactions.tags.
             cursor.execute("""
             CREATE TABLE IF NOT EXISTS tags (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -214,13 +214,13 @@ class DBManager:
             """)
             self._ensure_tags_from_transactions(cursor)
 
-            # Заполнение настроек по умолчанию
+            # Populate default settings
             cursor.execute("SELECT COUNT(*) FROM settings")
             if cursor.fetchone()[0] == 0:
                 cursor.execute("INSERT INTO settings (key, value) VALUES ('base_currency', 'USD')")
                 cursor.execute("INSERT INTO settings (key, value) VALUES ('planned_monthly_income', '2000')")
 
-            # Заполнение курсов валют по умолчанию (1 ед. валюты = X USD)
+            # Populate default exchange rates (1 unit of currency = X USD)
             cursor.execute("SELECT COUNT(*) FROM currency_rates")
             if cursor.fetchone()[0] == 0:
                 cursor.execute("INSERT INTO currency_rates (code, rate_to_usd, last_updated) VALUES ('USD', 1.0, ?)", (datetime.now().isoformat(),))
@@ -228,11 +228,11 @@ class DBManager:
                 cursor.execute("INSERT INTO currency_rates (code, rate_to_usd, last_updated) VALUES ('UAH', 0.025, ?)", (datetime.now().isoformat(),))
                 cursor.execute("INSERT INTO currency_rates (code, rate_to_usd, last_updated) VALUES ('RUB', 0.011, ?)", (datetime.now().isoformat(),))
 
-            # Заполнение категорий по умолчанию
+            # Populate default categories
             cursor.execute("SELECT COUNT(*) FROM categories")
             if cursor.fetchone()[0] == 0:
                 default_categories = [
-                    # Расходы
+                    # Expenses
                     ('Продукты', 'expense', '🍏', '#4CAF50'),
                     ('Транспорт', 'expense', '🚗', '#2196F3'),
                     ('Жилье и ЖКХ', 'expense', '🏠', '#FF9800'),
@@ -241,7 +241,7 @@ class DBManager:
                     ('Одежда и Покупки', 'expense', '🛍️', '#00BCD4'),
                     ('Здоровье', 'expense', '💊', '#F44336'),
                     ('Другое', 'expense', '💸', '#9E9E9E'),
-                    # Доходы
+                    # Incomes
                     ('Зарплата', 'income', '💼', '#009688'),
                     ('Инвестиции', 'income', '📈', '#FFC107'),
                     ('Подработка', 'income', '💰', '#00E676'),
@@ -251,7 +251,7 @@ class DBManager:
 
             self._ensure_default_subcategories(cursor)
 
-            # Заполнение счетов по умолчанию
+            # Populate default accounts
             cursor.execute("SELECT COUNT(*) FROM accounts")
             if cursor.fetchone()[0] == 0:
                 cursor.execute("INSERT INTO accounts (name, balance, currency, color) VALUES ('Наличные', 200.0, 'USD', '#8BC34A')")
@@ -259,7 +259,7 @@ class DBManager:
 
             conn.commit()
 
-    # --- РАБОТА С НАСТРОЙКАМИ ---
+    # --- SETTINGS MANAGEMENT ---
     def get_setting(self, key: str, default: Optional[str] = None) -> Optional[str]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -273,7 +273,7 @@ class DBManager:
             conn.commit()
             self._mark_changed()
 
-    # --- РАБОТА С КУРСАМИ ВАЛЮТ ---
+    # --- EXCHANGE RATES MANAGEMENT ---
     def get_rates(self) -> Dict[str, float]:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -292,14 +292,14 @@ class DBManager:
             return amount
         rates = self.get_rates()
         if from_curr not in rates or to_curr not in rates:
-            return amount  # Если валюты нет, возвращаем без изменений
+            return amount  # If currency not found, return without changes
 
-        # Переводим в USD, затем в целевую валюту
+        # Convert to USD, then to target currency
         amount_usd = amount * rates[from_curr]
         amount_target = amount_usd / rates[to_curr]
         return round(amount_target, 2)
 
-    # --- РАБОТА СО СЧЕТАМИ (ACCOUNTS) ---
+    # --- ACCOUNTS MANAGEMENT ---
     def add_account(self, name: str, balance: float, currency: str, color: str) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -337,7 +337,7 @@ class DBManager:
             self._mark_changed()
             return True
 
-    # --- РАБОТА С КАТЕГОРИЯМИ (CATEGORIES) ---
+    # --- CATEGORIES MANAGEMENT ---
     def add_category(self, name: str, type_: str, icon: str, color: str, parent_id: Optional[int] = None) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -370,13 +370,13 @@ class DBManager:
 
     def delete_category(self, category_id: int) -> bool:
         with self._get_connection() as conn:
-            # Находим ID дефолтной категории "Другое"
+            # Find the ID of the default "Other" category
             cursor = conn.cursor()
             cursor.execute("SELECT id FROM categories WHERE name = 'Другое' AND type = 'expense' LIMIT 1")
             row = cursor.fetchone()
             other_id = row['id'] if row else None
 
-            # Если удаляем расходную категорию, переносим транзакции в "Другое"
+            # If deleting an expense category, move transactions to "Other"
             if other_id and other_id != category_id:
                 conn.execute("UPDATE transactions SET category_id = ? WHERE category_id = ?", (other_id, category_id))
                 conn.execute("UPDATE subscriptions SET category_id = ? WHERE category_id = ?", (other_id, category_id))
@@ -386,12 +386,12 @@ class DBManager:
             self._mark_changed()
             return True
 
-    # --- РАБОТА С ТРАНЗАКЦИЯМИ (TRANSACTIONS) ---
+    # --- TRANSACTIONS MANAGEMENT ---
     def add_transaction(self, t: Transaction) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # Вставляем транзакцию
+            # Insert transaction
             cursor.execute("""
             INSERT INTO transactions (amount, currency, category_id, account_id, transfer_to_account_id, date, description, tags)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -399,21 +399,21 @@ class DBManager:
             t_id = cursor.lastrowid
             self._sync_transaction_tags(cursor, t_id, t.tags)
 
-            # Обновляем балансы счетов
+            # Update account balances
             if t.transfer_to_account_id:
-                # Внутренний перевод
-                # Списываем со счета-отправителя (сконвертировав в его валюту)
+                # Internal transfer
+                # Deduct from sender account (converted to its currency)
                 acc_from = self.get_account(t.account_id)
                 amount_from = self.convert_amount(t.amount, t.currency, acc_from.currency)
                 cursor.execute("UPDATE accounts SET balance = balance - ? WHERE id = ?", (amount_from, t.account_id))
 
-                # Зачисляем на счет-получатель (сконвертировав в его валюту)
+                # Add to receiver account (converted to its currency)
                 acc_to = self.get_account(t.transfer_to_account_id)
                 amount_to = self.convert_amount(t.amount, t.currency, acc_to.currency)
                 cursor.execute("UPDATE accounts SET balance = balance + ? WHERE id = ?", (amount_to, t.transfer_to_account_id))
             else:
-                # Обычный доход / расход
-                # Находим тип категории
+                # Regular income / expense
+                # Find category type
                 category = self.get_category(t.category_id)
                 is_income = category and category.type == 'income'
 
@@ -535,7 +535,7 @@ class DBManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            # Получаем детали транзакции
+            # Get transaction details
             cursor.execute("SELECT amount, currency, category_id, account_id, transfer_to_account_id FROM transactions WHERE id = ?", (t_id,))
             row = cursor.fetchone()
             if not row:
@@ -547,7 +547,7 @@ class DBManager:
             account_id = row['account_id']
             transfer_to_account_id = row['transfer_to_account_id']
 
-            # Откатываем балансы
+            # Roll back balances
             if transfer_to_account_id:
                 acc_from = self.get_account(account_id)
                 amount_from = self.convert_amount(amount, currency, acc_from.currency)
@@ -573,7 +573,7 @@ class DBManager:
             self._mark_changed()
             return True
 
-    # --- РАБОТА С БЮДЖЕТАМИ (BUDGETS) ---
+    # --- BUDGETS MANAGEMENT ---
     def add_or_update_budget(self, category_id: int, amount_limit: float, currency: str, month: str) -> bool:
         with self._get_connection() as conn:
             conn.execute("""
@@ -585,7 +585,7 @@ class DBManager:
             return True
 
     def get_budgets(self, month: str) -> List[Dict[str, Any]]:
-        """Возвращает бюджеты на указанный месяц с реальными тратами по ним."""
+        """Returns budgets for the specified month with actual spendings for them."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -597,7 +597,7 @@ class DBManager:
             """, (month,))
             budgets = [dict(r) for r in cursor.fetchall()]
 
-            # Считаем реальные траты по каждой категории за этот месяц
+            # Calculate actual spendings for each category for this month
             for b in budgets:
                 cursor.execute("""
                 SELECT amount, currency FROM transactions
@@ -606,7 +606,7 @@ class DBManager:
 
                 total_spent = 0.0
                 for row in cursor.fetchall():
-                    # Конвертируем в валюту лимита бюджета
+                    # Convert to the budget limit currency
                     total_spent += self.convert_amount(row['amount'], row['currency'], b['currency'])
 
                 b['spent'] = round(total_spent, 2)
@@ -620,7 +620,7 @@ class DBManager:
             self._mark_changed()
             return True
 
-    # --- РАБОТА С ЦЕЛЯМИ (GOALS) ---
+    # --- GOALS MANAGEMENT ---
     def add_goal(self, name: str, target_amount: float, currency: str, deadline: Optional[str] = None) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -652,7 +652,7 @@ class DBManager:
             self._mark_changed()
             return True
 
-    # --- РАБОТА С ПОДПИСКАМИ (SUBSCRIPTIONS) ---
+    # --- SUBSCRIPTIONS MANAGEMENT ---
     def add_subscription(self, name: str, amount: float, currency: str, category_id: Optional[int], period: str, next_payment_date: str) -> int:
         with self._get_connection() as conn:
             cursor = conn.cursor()

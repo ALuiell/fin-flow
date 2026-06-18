@@ -9,6 +9,7 @@ from database.db_manager import DBManager
 from models import Account, Category
 from ui.dialogs import AccountDialog, CategoryDialog
 from utils.currency_api import update_exchange_rates
+from utils.formatting import format_amount
 
 class SettingsPage(QWidget):
     data_changed = Signal()
@@ -23,20 +24,20 @@ class SettingsPage(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(15)
 
-        # Таб-виджет для разделения настроек
+        # Tab widget to separate settings
         self.tabs = QTabWidget()
 
-        # 1. Основные
+        # 1. General
         self.tab_general = QWidget()
         self.init_general_tab()
         self.tabs.addTab(self.tab_general, "⚙️ Основные")
 
-        # 2. Счета
+        # 2. Accounts
         self.tab_accounts = QWidget()
         self.init_accounts_tab()
         self.tabs.addTab(self.tab_accounts, "💳 Кошельки / Счета")
 
-        # 3. Категории
+        # 3. Categories
         self.tab_categories = QWidget()
         self.init_categories_tab()
         self.tabs.addTab(self.tab_categories, "📁 Категории")
@@ -48,7 +49,7 @@ class SettingsPage(QWidget):
         self.refresh_accounts()
         self.refresh_categories()
 
-    # --- ВКЛАДКА 1: ОСНОВНЫЕ НАСТРОЙКИ ---
+    # --- TAB 1: GENERAL SETTINGS ---
     def init_general_tab(self):
         lay = QVBoxLayout(self.tab_general)
         lay.setContentsMargins(15, 15, 15, 15)
@@ -59,7 +60,7 @@ class SettingsPage(QWidget):
         form_lay = QFormLayout(form_card)
         form_lay.setContentsMargins(15, 15, 15, 15)
 
-        # Выбор базовой валюты
+        # Select base currency
         self.curr_combo = QComboBox()
         self.curr_combo.addItems(["USD", "EUR", "UAH", "RUB", "BYN", "KZT"])
         base_curr = self.db.get_setting("base_currency", "USD")
@@ -67,7 +68,7 @@ class SettingsPage(QWidget):
         self.curr_combo.currentIndexChanged.connect(self.save_base_currency)
         form_lay.addRow("Базовая валюта приложения:", self.curr_combo)
 
-        # Ожидаемый месячный доход
+        # Expected monthly income
         self.salary_input = QLineEdit()
         planned = self.db.get_setting("planned_monthly_income", "2000")
         self.salary_input.setText(planned)
@@ -81,7 +82,7 @@ class SettingsPage(QWidget):
         salary_h.addWidget(salary_save_btn)
         form_lay.addRow("Планируемый доход в месяц:", salary_h)
 
-        # Открыть папку с БД
+        # Open DB folder
         self.open_db_btn = QPushButton("📂 Открыть папку с базой данных")
         self.open_db_btn.setObjectName("SecondaryButton")
         self.open_db_btn.clicked.connect(self.open_db_folder)
@@ -89,7 +90,7 @@ class SettingsPage(QWidget):
 
         lay.addWidget(form_card)
 
-        # Курсы валют
+        # Currency rates
         rates_card = QFrame()
         rates_card.setObjectName("CardFrame")
         rates_lay = QVBoxLayout(rates_card)
@@ -148,7 +149,7 @@ class SettingsPage(QWidget):
     def sync_rates(self):
         self.sync_btn.setEnabled(False)
         self.sync_btn.setText("Синхронизация...")
-        # Запускаем в синхронном режиме (для локального приложения допустимо, так как таймаут 5с)
+        # Run in synchronous mode (acceptable for local app as timeout is 5s)
         success = update_exchange_rates(self.db)
         self.sync_btn.setEnabled(True)
         self.sync_btn.setText("🔄 Синхронизировать из сети")
@@ -184,7 +185,7 @@ class SettingsPage(QWidget):
         else:
             subprocess.Popen(['xdg-open', db_dir])
 
-    # --- ВКЛАДКА 2: УПРАВЛЕНИЕ СЧЕТАМИ ---
+    # --- TAB 2: ACCOUNT MANAGEMENT ---
     def init_accounts_tab(self):
         lay = QVBoxLayout(self.tab_accounts)
         lay.setContentsMargins(15, 15, 15, 15)
@@ -223,7 +224,7 @@ class SettingsPage(QWidget):
         self.acc_table.setSelectionMode(QTableWidget.SingleSelection)
         lay.addWidget(self.acc_table)
 
-        # Интерактивность
+        # Interactivity
         self.acc_table.itemDoubleClicked.connect(self.edit_account)
 
         self.acc_del_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.acc_table)
@@ -238,10 +239,10 @@ class SettingsPage(QWidget):
         for row, a in enumerate(accs):
             self.acc_table.setItem(row, 0, QTableWidgetItem(str(a.id)))
             self.acc_table.setItem(row, 1, QTableWidgetItem(a.name))
-            self.acc_table.setItem(row, 2, QTableWidgetItem(f"{a.balance:,.2f}"))
+            self.acc_table.setItem(row, 2, QTableWidgetItem(format_amount(a.balance)))
             self.acc_table.setItem(row, 3, QTableWidgetItem(a.currency))
 
-            # Цветовой блок
+            # Color block
             color_item = QTableWidgetItem("■■■")
             color_item.setForeground(QColor(a.color))
             self.acc_table.setItem(row, 4, color_item)
@@ -281,7 +282,7 @@ class SettingsPage(QWidget):
 
         acc_id = int(self.acc_table.item(row, 0).text())
 
-        # Защита от удаления последнего счета
+        # Protection against deleting the last account
         if len(self.db.get_accounts()) <= 1:
             QMessageBox.warning(self, "Удаление", "Нельзя удалить единственный кошелек.")
             return
@@ -293,7 +294,7 @@ class SettingsPage(QWidget):
                 self.refresh_accounts()
                 self.data_changed.emit()
 
-    # --- ВКЛАДКА 3: УПРАВЛЕНИЕ КАТЕГОРИЯМИ ---
+    # --- TAB 3: CATEGORY MANAGEMENT ---
     def init_categories_tab(self):
         lay = QVBoxLayout(self.tab_categories)
         lay.setContentsMargins(15, 15, 15, 15)
@@ -333,7 +334,7 @@ class SettingsPage(QWidget):
         self.cat_tree.setIndentation(40)
         lay.addWidget(self.cat_tree)
 
-        # Интерактивность
+        # Interactivity
         self.cat_tree.doubleClicked.connect(self.edit_category)
 
         self.cat_del_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.cat_tree)
@@ -345,12 +346,12 @@ class SettingsPage(QWidget):
     def refresh_categories(self):
         cats = self.db.get_categories()
 
-        # Сортируем так, чтобы подкатегории шли сразу после родителей
+        # Sort so that subcategories go right after parents
         model = QStandardItemModel()
         model.setHorizontalHeaderLabels(["Категория", "Тип", "Цвет", "ID"])
 
         parents = {}
-        # Сначала добавляем родительские
+        # First add parents
         for c in cats:
             if c.parent_id is None:
                 display_text = f"{c.icon or ''} {c.name}".strip()
@@ -365,7 +366,7 @@ class SettingsPage(QWidget):
                 parents[c.id] = cat_item
                 model.appendRow([cat_item, type_item, color_item, id_item])
 
-        # Затем подкатегории
+        # Then subcategories
         for c in cats:
             if c.parent_id is not None:
                 display_text = f"{c.icon or ''} {c.name}".strip()
@@ -387,7 +388,7 @@ class SettingsPage(QWidget):
         proxy.setSourceModel(model)
         proxy.setFilterCaseSensitivity(Qt.CaseInsensitive)
         proxy.setRecursiveFilteringEnabled(True)
-        proxy.setFilterKeyColumn(0) # Ищем по названию
+        proxy.setFilterKeyColumn(0) # Search by name
 
         self.cat_proxy = proxy
         self.cat_proxy.setFilterFixedString(self.cat_search.text())
@@ -429,7 +430,7 @@ class SettingsPage(QWidget):
         cat_id = int(selection[0].data(Qt.UserRole))
         cat = self.db.get_category(cat_id)
         if cat:
-            # Защита от редактирования базовой дефолтной категории "Другое"
+            # Protection against editing the base default category "Other"
             if cat.name == "Другое":
                 QMessageBox.warning(self, "Редактирование", "Нельзя редактировать категорию 'Другое' по умолчанию.")
                 return

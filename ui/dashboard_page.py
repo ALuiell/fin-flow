@@ -5,10 +5,11 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor
 from database.db_manager import DBManager
 from utils.analytics_helper import calculate_safe_to_spend
+from utils.formatting import format_money
 from ui.dialogs import TransactionDialog
 
 class DashboardPage(QWidget):
-    # Сигнал для обновления всего приложения после добавления транзакции
+    # Signal to update the whole application after adding a transaction
     data_changed = Signal()
 
     def __init__(self, db: DBManager, parent=None):
@@ -21,31 +22,31 @@ class DashboardPage(QWidget):
         main_layout.setContentsMargins(15, 15, 15, 15)
         main_layout.setSpacing(15)
 
-        # Левая часть - Баланс, Safe-to-Spend, Быстрые действия, Счета
+        # Left part - Balance, Safe-to-Spend, Quick actions, Accounts
         left_layout = QVBoxLayout()
         left_layout.setSpacing(15)
 
-        # 1. Карточка баланса и Safe-to-Spend
+        # 1. Balance and Safe-to-Spend card
         balance_card = QFrame()
         balance_card.setObjectName("CardFrame")
         balance_layout = QHBoxLayout(balance_card)
         balance_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Общий баланс
+        # Total balance
         total_bal_layout = QVBoxLayout()
         bal_title = QLabel("Общий баланс")
         bal_title.setObjectName("CardTitle")
-        self.bal_value = QLabel("0.00 RUB")
+        self.bal_value = QLabel("0 RUB")
         self.bal_value.setObjectName("CardValue")
         total_bal_layout.addWidget(bal_title)
         total_bal_layout.addWidget(self.bal_value)
         total_bal_layout.addStretch()
 
-        # Safe-to-Spend лимит на день
+        # Safe-to-Spend limit for the day
         safe_spend_layout = QVBoxLayout()
         safe_title = QLabel("Можно потратить сегодня")
         safe_title.setObjectName("CardTitle")
-        self.safe_value = QLabel("0.00 RUB")
+        self.safe_value = QLabel("0 RUB")
         self.safe_value.setObjectName("CardValue")
         self.safe_value.setStyleSheet("color: #8A2BE2; font-size: 28px;")
         safe_spend_layout.addWidget(safe_title)
@@ -58,29 +59,29 @@ class DashboardPage(QWidget):
         balance_layout.addStretch()
         left_layout.addWidget(balance_card)
 
-        # 2. Карточки показателей трат/доходов за месяц
+        # 2. Monthly expense/income indicator cards
         stats_layout = QHBoxLayout()
         stats_layout.setSpacing(15)
 
-        # Доходы месяца
+        # Monthly income
         inc_card = QFrame()
         inc_card.setObjectName("CardFrame")
         inc_lay = QVBoxLayout(inc_card)
         inc_title = QLabel("Доходы месяца")
         inc_title.setObjectName("CardTitle")
-        self.inc_value = QLabel("+0.00 RUB")
+        self.inc_value = QLabel("+0 RUB")
         self.inc_value.setStyleSheet("color: #00E676; font-weight: bold; font-size: 20px;")
         inc_lay.addWidget(inc_title)
         inc_lay.addWidget(self.inc_value)
         stats_layout.addWidget(inc_card)
 
-        # Расходы месяца
+        # Monthly expenses
         exp_card = QFrame()
         exp_card.setObjectName("CardFrame")
         exp_lay = QVBoxLayout(exp_card)
         exp_title = QLabel("Расходы месяца")
         exp_title.setObjectName("CardTitle")
-        self.exp_value = QLabel("-0.00 RUB")
+        self.exp_value = QLabel("-0 RUB")
         self.exp_value.setStyleSheet("color: #F44336; font-weight: bold; font-size: 20px;")
         exp_lay.addWidget(exp_title)
         exp_lay.addWidget(self.exp_value)
@@ -88,7 +89,7 @@ class DashboardPage(QWidget):
 
         left_layout.addLayout(stats_layout)
 
-        # 3. Список счетов (Кошельки)
+        # 3. Account list (Wallets)
         accounts_card = QFrame()
         accounts_card.setObjectName("CardFrame")
         accounts_lay = QVBoxLayout(accounts_card)
@@ -104,11 +105,11 @@ class DashboardPage(QWidget):
 
         main_layout.addLayout(left_layout, stretch=3)
 
-        # Правая часть - Быстрые кнопки и Последние транзакции
+        # Right part - Quick buttons and Recent transactions
         right_layout = QVBoxLayout()
         right_layout.setSpacing(15)
 
-        # Быстрые кнопки
+        # Quick buttons
         actions_card = QFrame()
         actions_card.setObjectName("CardFrame")
         actions_layout = QHBoxLayout(actions_card)
@@ -133,7 +134,7 @@ class DashboardPage(QWidget):
         actions_layout.addWidget(self.add_transfer_btn)
         right_layout.addWidget(actions_card)
 
-        # Последние транзакции
+        # Recent transactions
         txs_card = QFrame()
         txs_card.setObjectName("CardFrame")
         txs_layout = QVBoxLayout(txs_card)
@@ -158,27 +159,27 @@ class DashboardPage(QWidget):
 
         main_layout.addLayout(right_layout, stretch=4)
 
-        # Первичное заполнение
+        # Initial population
         self.refresh_data()
 
     def refresh_data(self):
         base_currency = self.db.get_setting("base_currency", "RUB")
         
-        # 1. Считаем общий баланс по всем счетам
+        # 1. Calculate total balance across all accounts
         total_balance_base = 0.0
         accounts = self.db.get_accounts()
         for acc in accounts:
             balance_converted = self.db.convert_amount(acc.balance, acc.currency, base_currency)
             total_balance_base += balance_converted
-        self.bal_value.setText(f"{total_balance_base:,.2f} {base_currency}")
+        self.bal_value.setText(format_money(total_balance_base, base_currency))
 
-        # 2. Обновляем Safe-to-Spend
+        # 2. Update Safe-to-Spend
         safe_data = calculate_safe_to_spend(self.db)
-        self.safe_value.setText(f"{safe_data['safe_today']:,.2f} {base_currency}")
-        self.inc_value.setText(f"+{safe_data['actual_incomes']:,.2f} {base_currency}")
-        self.exp_value.setText(f"-{safe_data['actual_expenses']:,.2f} {base_currency}")
+        self.safe_value.setText(format_money(safe_data['safe_today'], base_currency))
+        self.inc_value.setText(f"+{format_money(safe_data['actual_incomes'], base_currency)}")
+        self.exp_value.setText(f"-{format_money(safe_data['actual_expenses'], base_currency)}")
 
-        # 3. Список счетов
+        # 3. Account list
         self.accounts_list.clear()
         for acc in accounts:
             item = QListWidgetItem()
@@ -186,14 +187,14 @@ class DashboardPage(QWidget):
             layout = QHBoxLayout(widget)
             layout.setContentsMargins(10, 5, 10, 5)
             
-            # Кружок цвета счета
+            # Account color dot
             color_dot = QLabel("●")
             color_dot.setStyleSheet(f"color: {acc.color}; font-size: 16px;")
             
             name_lbl = QLabel(acc.name)
             name_lbl.setStyleSheet("font-weight: 600;")
             
-            bal_lbl = QLabel(f"{acc.balance:,.2f} {acc.currency}")
+            bal_lbl = QLabel(format_money(acc.balance, acc.currency))
             bal_lbl.setStyleSheet("font-weight: bold; color: #FFFFFF;")
             
             layout.addWidget(color_dot)
@@ -205,15 +206,15 @@ class DashboardPage(QWidget):
             self.accounts_list.addItem(item)
             self.accounts_list.setItemWidget(item, widget)
 
-        # 4. Последние транзакции
-        txs = self.db.get_transactions()[:8]  # последние 8
+        # 4. Recent transactions
+        txs = self.db.get_transactions()[:8]  # last 8
         self.tx_table.setRowCount(len(txs))
         
         for row_idx, t in enumerate(txs):
-            # Дата
+            # Date
             self.tx_table.setItem(row_idx, 0, QTableWidgetItem(t['date']))
             
-            # Описание
+            # Description
             if t['transfer_to_account_id']:
                 desc = f"🔄 Перевод на {t['transfer_account_name']}"
             else:
@@ -223,11 +224,11 @@ class DashboardPage(QWidget):
             
             self.tx_table.setItem(row_idx, 1, QTableWidgetItem(desc))
             
-            # Счет
+            # Account
             self.tx_table.setItem(row_idx, 2, QTableWidgetItem(t['account_name']))
             
-            # Сумма
-            amount_str = f"{t['amount']:,.2f} {t['currency']}"
+            # Amount
+            amount_str = format_money(t['amount'], t['currency'])
             amount_item = QTableWidgetItem()
             
             if t['transfer_to_account_id']:

@@ -9,6 +9,7 @@ from models import Transaction
 from ui.dialogs import TransactionDialog
 from ui.custom_widgets import CategoryFilterWidget, TagFilterWidget
 from utils.analytics_helper import sort_transactions_by_selected_subcategories
+from utils.formatting import format_money
 from datetime import datetime
 
 class TransactionsPage(QWidget):
@@ -190,6 +191,8 @@ class TransactionsPage(QWidget):
         self.table.setRowCount(len(txs))
 
         for row_idx, t in enumerate(txs):
+            is_subcategory_match = bool(selected_subcategory_ids and t['category_id'] in selected_subcategory_ids)
+
             # ID
             self.table.setItem(row_idx, 0, QTableWidgetItem(str(t['id'])))
 
@@ -201,7 +204,15 @@ class TransactionsPage(QWidget):
                 cat_desc = f"🔄 Перевод"
             else:
                 cat_desc = f"{t['category_icon']} {t['category_name']}"
-            self.table.setItem(row_idx, 2, QTableWidgetItem(cat_desc))
+            if is_subcategory_match:
+                cat_desc = f"◆ {cat_desc}"
+            category_item = QTableWidgetItem(cat_desc)
+            if is_subcategory_match:
+                font = category_item.font()
+                font.setBold(True)
+                category_item.setFont(font)
+                category_item.setForeground(QColor("#FFFFFF"))
+            self.table.setItem(row_idx, 2, category_item)
 
             # Счет
             if t['transfer_to_account_id']:
@@ -217,7 +228,7 @@ class TransactionsPage(QWidget):
             self.table.setItem(row_idx, 5, QTableWidgetItem(t['tags'] or ""))
 
             # Сумма
-            amount_str = f"{t['amount']:,.2f} {t['currency']}"
+            amount_str = format_money(t['amount'], t['currency'])
             amount_item = QTableWidgetItem()
 
             if t['transfer_to_account_id']:
@@ -233,8 +244,8 @@ class TransactionsPage(QWidget):
             amount_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
             self.table.setItem(row_idx, 6, amount_item)
 
-            if selected_subcategory_ids and t['category_id'] in selected_subcategory_ids:
-                highlight = QColor(138, 43, 226, 38)
+            if is_subcategory_match:
+                highlight = QColor("#332245")
                 for col in range(self.table.columnCount()):
                     item = self.table.item(row_idx, col)
                     if item:

@@ -6,6 +6,7 @@ from PySide6.QtGui import QColor
 from database.db_manager import DBManager
 from models import Subscription
 from ui.dialogs import SubscriptionDialog
+from utils.formatting import format_money
 from datetime import datetime
 
 class SubscriptionsPage(QWidget):
@@ -21,13 +22,13 @@ class SubscriptionsPage(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(15)
 
-        # 1. Верхний информационный блок
+        # 1. Top information block
         info_card = QFrame()
         info_card.setObjectName("CardFrame")
         info_layout = QHBoxLayout(info_card)
         info_layout.setContentsMargins(20, 20, 20, 20)
 
-        # Всего подписок
+        # Total subscriptions
         count_lay = QVBoxLayout()
         count_title = QLabel("Активных подписок")
         count_title.setObjectName("CardTitle")
@@ -38,11 +39,11 @@ class SubscriptionsPage(QWidget):
         info_layout.addLayout(count_lay)
         info_layout.addSpacing(30)
 
-        # Общая сумма в месяц
+        # Total monthly sum
         sum_lay = QVBoxLayout()
         sum_title = QLabel("Общая сумма в месяц")
         sum_title.setObjectName("CardTitle")
-        self.sum_val = QLabel("0.00 RUB")
+        self.sum_val = QLabel("0 RUB")
         self.sum_val.setObjectName("CardValue")
         self.sum_val.setStyleSheet("color: #8A2BE2;")
         sum_lay.addWidget(sum_title)
@@ -50,7 +51,7 @@ class SubscriptionsPage(QWidget):
         info_layout.addLayout(sum_lay)
         info_layout.addSpacing(30)
 
-        # Процент от зарплаты
+        # Percentage of salary
         salary_lay = QVBoxLayout()
         salary_title = QLabel("Доля от планируемого дохода")
         salary_title.setObjectName("CardTitle")
@@ -63,7 +64,7 @@ class SubscriptionsPage(QWidget):
         info_layout.addStretch()
         layout.addWidget(info_card)
 
-        # 2. Кнопки действий
+        # 2. Action buttons
         btn_layout = QHBoxLayout()
         
         self.add_btn = QPushButton("➕ Добавить подписку")
@@ -89,7 +90,7 @@ class SubscriptionsPage(QWidget):
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
-        # 3. Таблица подписок
+        # 3. Subscriptions table
         self.table = QTableWidget()
         self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(["ID", "Название", "Категория", "Стоимость", "Период", "Списание", "Статус"])
@@ -126,31 +127,31 @@ class SubscriptionsPage(QWidget):
             # ID
             self.table.setItem(row_idx, 0, QTableWidgetItem(str(s['id'])))
             
-            # Название
+            # Name
             self.table.setItem(row_idx, 1, QTableWidgetItem(s['name']))
             
-            # Категория
+            # Category
             cat_desc = f"{s['category_icon']} {s['category_name']}" if s['category_name'] else "Нет"
             self.table.setItem(row_idx, 2, QTableWidgetItem(cat_desc))
 
-            # Стоимость
-            self.table.setItem(row_idx, 3, QTableWidgetItem(f"{s['amount']:,.2f} {s['currency']}"))
+            # Cost
+            self.table.setItem(row_idx, 3, QTableWidgetItem(format_money(s['amount'], s['currency'])))
 
-            # Период
+            # Period
             period_str = "Ежемесячно" if s['period'] == 'monthly' else "Ежегодно"
             self.table.setItem(row_idx, 4, QTableWidgetItem(period_str))
 
-            # Следующий платеж
+            # Next payment
             self.table.setItem(row_idx, 5, QTableWidgetItem(s['next_payment_date']))
 
-            # Статус
+            # Status
             status_item = QTableWidgetItem()
             if s['is_active']:
                 status_item.setText("Активна")
                 status_item.setForeground(QColor("#00E676"))
                 active_count += 1
                 
-                # Считаем сумму в месяц
+                # Calculate monthly sum
                 amount_base = self.db.convert_amount(s['amount'], s['currency'], base_currency)
                 if s['period'] == 'yearly':
                     total_monthly_sum_base += (amount_base / 12.0)
@@ -162,11 +163,11 @@ class SubscriptionsPage(QWidget):
                 
             self.table.setItem(row_idx, 6, status_item)
 
-        # Выводим инфо на карточки
+        # Display info on cards
         self.count_val.setText(str(active_count))
-        self.sum_val.setText(f"{total_monthly_sum_base:,.2f} {base_currency}")
+        self.sum_val.setText(format_money(total_monthly_sum_base, base_currency))
         
-        # Доля от зарплаты
+        # Share of salary
         if planned_income > 0:
             share = (total_monthly_sum_base / planned_income) * 100
             self.salary_val.setText(f"{share:.1f}%")
@@ -217,7 +218,7 @@ class SubscriptionsPage(QWidget):
             )
             dialog = SubscriptionDialog(self.db, subscription=sub, parent=self)
             if dialog.exec() == SubscriptionDialog.Accepted:
-                # Сохраняем состояние активности
+                # Save active state
                 dialog.result_subscription.is_active = sub.is_active
                 self.db.update_subscription(dialog.result_subscription)
                 self.refresh_data()

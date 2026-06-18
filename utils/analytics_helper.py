@@ -5,16 +5,16 @@ from typing import List, Dict, Any
 from database.db_manager import DBManager
 
 def eval_expression(expr_str: str) -> float:
-    """Безопасно вычисляет математическое выражение из строки."""
+    """Safely evaluates a mathematical expression from a string."""
     if not expr_str:
         return 0.0
-    # Очищаем строку
+    # Clean the string
     expr_str = expr_str.replace(" ", "").replace(",", ".")
-    # Разрешаем только цифры, точки, круглые скобки и базовые операторы
+    # Allow only digits, dots, parentheses and basic operators
     if not re.match(r"^[\d.+\-*/()]+$", expr_str):
         raise ValueError("Недопустимые символы")
     try:
-        # Ограничиваем пространство имен для безопасности
+        # Limit namespace for safety
         result = float(eval(expr_str, {"__builtins__": None}, {}))
         return round(result, 2)
     except Exception:
@@ -108,8 +108,8 @@ def sort_transactions_by_selected_subcategories(
 
 def calculate_safe_to_spend(db: DBManager) -> Dict[str, Any]:
     """
-    Рассчитывает динамический лимит трат на сегодня.
-    Формула: (Плановый доход - Фактические расходы этого месяца - Предстоящие подписки этого месяца) / Оставшиеся дни в месяце
+    Calculates the dynamic spending limit for today.
+    Formula: (Planned income - Actual expenses this month - Upcoming subscriptions this month) / Remaining days in the month
     """
     base_currency = db.get_setting("base_currency", "RUB")
     try:
@@ -121,20 +121,20 @@ def calculate_safe_to_spend(db: DBManager) -> Dict[str, Any]:
     year, month = today.year, today.month
     days_in_month = get_days_in_month(year, month)
     passed_days = today.day
-    remaining_days = days_in_month - passed_days + 1  # Включая сегодняшний день
+    remaining_days = days_in_month - passed_days + 1  # Including today
 
-    # Вытаскиваем все транзакции текущего месяца
+    # Extract all transactions for the current month
     start_date = f"{year}-{month:02d}-01"
     end_date = f"{year}-{month:02d}-{days_in_month:02d}"
     
     transactions = db.get_transactions(start_date=start_date, end_date=end_date)
     
-    # Считаем фактические расходы и фактические доходы
+    # Calculate actual expenses and actual incomes
     actual_expenses = 0.0
     actual_incomes = 0.0
     
     for t in transactions:
-        # Пропускаем переводы
+        # Skip transfers
         if t['transfer_to_account_id'] is not None:
             continue
         
@@ -144,21 +144,21 @@ def calculate_safe_to_spend(db: DBManager) -> Dict[str, Any]:
         elif t['category_type'] == 'income':
             actual_incomes += amount_base
 
-    # Находим предстоящие (еще не оплаченные в этом месяце) подписки
+    # Find upcoming (not yet paid this month) subscriptions
     subscriptions = db.get_subscriptions()
     upcoming_subs_total = 0.0
     
     for s in subscriptions:
         if not s['is_active']:
             continue
-        # Если дата следующего списания в этом месяце и она >= сегодня
+        # If the next payment date is in this month and is >= today
         next_pay = datetime.strptime(s['next_payment_date'], "%Y-%m-%d").date()
         if next_pay.year == year and next_pay.month == month and next_pay >= today:
             sub_amount_base = db.convert_amount(s['amount'], s['currency'], base_currency)
             upcoming_subs_total += sub_amount_base
 
-    # Считаем остаток бюджета
-    # Базовая логика: мы ориентируемся на планируемый доход (или реальный доход, если он больше)
+    # Calculate remaining budget
+    # Base logic: we focus on the planned income (or real income, if it's larger)
     effective_income = max(planned_income, actual_incomes)
     remaining_budget = effective_income - actual_expenses - upcoming_subs_total
 
@@ -181,7 +181,7 @@ def get_analytics_summary(
     transactions: List[Dict[str, Any]] | None = None,
     base_currency: str | None = None,
 ) -> Dict[str, Any]:
-    """Возвращает прогнозы, средний чек, самый затратный день недели и другие инсайты."""
+    """Returns forecasts, average check, most expensive day of the week, and other insights."""
     base_currency = base_currency or db.get_setting("base_currency", "RUB")
     selected_date = selected_date or date.today()
     year, month = selected_date.year, selected_date.month
@@ -194,11 +194,11 @@ def get_analytics_summary(
     
     expense_txs = [t for t in transactions if t['category_type'] == 'expense' and t['transfer_to_account_id'] is None]
     
-    # 1. Средний чек
+    # 1. Average check
     total_expense = sum(db.convert_amount(t['amount'], t['currency'], base_currency) for t in expense_txs)
     avg_check = round(total_expense / len(expense_txs), 2) if expense_txs else 0.0
 
-    # 2. Самый затратный день недели
+    # 2. Most expensive day of the week
     weekday_names = ["Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота", "Воскресенье"]
     weekday_expenses = {i: 0.0 for i in range(7)}
     for t in expense_txs:
@@ -210,20 +210,20 @@ def get_analytics_summary(
     top_weekday_sum = weekday_expenses[top_weekday_idx]
     top_weekday = weekday_names[top_weekday_idx] if top_weekday_sum > 0 else "Нет данных"
 
-    # 3. Прогноз трат на конец месяца
+    # 3. Spend forecast for the end of the month
     if mode == "day":
         passed_days = selected_date.day
     elif year == date.today().year and month == date.today().month:
         passed_days = date.today().day
     else:
         passed_days = days_in_month
-    # Если это первый день месяца, делим на 1.
+    # If this is the first day of the month, divide by 1.
     days_divisor = passed_days if passed_days > 0 else 1
     projected_expense = (total_expense / days_divisor) * days_in_month
     projected_expense = round(projected_expense, 2)
 
-    # 4. Сравнение с прошлым месяцем
-    # Получаем траты за прошлый месяц
+    # 4. Comparison with the previous month
+    # Get expenses for the previous month
     prev_expense = 0.0
     diff_percent = 0.0
     if mode != "day":

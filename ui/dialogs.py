@@ -37,59 +37,59 @@ class TransactionDialog(BaseDialog):
         layout = QVBoxLayout(self)
         form = QFormLayout()
 
-        # 1. Тип операции
+        # 1. Operation type
         self.type_combo = QComboBox()
         self.type_combo.addItems(["Расход", "Доход", "Перевод"])
         self.type_combo.currentIndexChanged.connect(self.on_type_changed)
         form.addRow("Тип:", self.type_combo)
 
-        # 2. Сумма (с поддержкой выражений)
+        # 2. Amount (with expression support)
         self.amount_input = QLineEdit()
         self.amount_input.setPlaceholderText("Сумма (например: 150+200)")
         self.amount_input.editingFinished.connect(self.evaluate_amount)
         form.addRow("Сумма:", self.amount_input)
 
-        # 3. Валюта
+        # 3. Currency
         self.currency_combo = QComboBox()
         self.currency_combo.addItems(["USD", "EUR", "UAH", "RUB", "BYN", "KZT"])
         base_curr = self.db.get_setting("base_currency", "USD")
         self.currency_combo.setCurrentText(base_curr)
         form.addRow("Валюта:", self.currency_combo)
 
-        # 4. Счет списания / Счет
+        # 4. Withdrawal account / Account
         self.account_combo = QComboBox()
         self.load_accounts(self.account_combo)
         form.addRow("Счет:", self.account_combo)
 
-        # 5. Счет зачисления (для перевода)
+        # 5. Deposit account (for transfer)
         self.transfer_label = QLabel("Счет зачисления:")
         self.transfer_combo = QComboBox()
         self.load_accounts(self.transfer_combo)
         form.addRow(self.transfer_label, self.transfer_combo)
 
-        # 6. Категория
+        # 6. Category
         self.category_label = QLabel("Категория:")
         self.category_combo = CategorySelectorWidget()
         self.load_categories()
         form.addRow(self.category_label, self.category_combo)
 
-        # 7. Дата
+        # 7. Date
         self.date_input = QDateEdit()
         self.date_input.setCalendarPopup(True)
         self.date_input.setDate(QDate.currentDate())
         form.addRow("Дата:", self.date_input)
 
-        # 8. Описание
+        # 8. Description
         self.desc_input = QLineEdit()
         form.addRow("Описание:", self.desc_input)
 
-        # 9. Теги
+        # 9. Tags
         self.tags_input = TagSelector(self.db, self)
         form.addRow("Теги:", self.tags_input)
 
         layout.addLayout(form)
 
-        # Кнопки
+        # Buttons
         btn_layout = QHBoxLayout()
         self.save_btn = QPushButton("Сохранить")
         self.save_btn.setObjectName("PrimaryButton")
@@ -103,7 +103,7 @@ class TransactionDialog(BaseDialog):
         btn_layout.addWidget(self.save_btn)
         layout.addLayout(btn_layout)
 
-        # Инициализируем видимость по умолчанию
+        # Initialize default visibility
         self.on_type_changed(0)
 
     def load_accounts(self, combo: QComboBox):
@@ -116,9 +116,9 @@ class TransactionDialog(BaseDialog):
         self.category_combo.clear()
         self.categories = self.db.get_categories()
 
-        # Фильтруем в зависимости от выбранного типа
+        # Filter based on the selected type
         current_type = self.type_combo.currentText().lower()
-        # Если перевод, категории не нужны вовсе
+        # If transfer, categories are not needed at all
         if current_type == "расход":
             target_type = "expense"
         elif current_type == "доход":
@@ -133,13 +133,13 @@ class TransactionDialog(BaseDialog):
     def on_type_changed(self, idx):
         type_str = self.type_combo.currentText()
         if type_str == "Перевод":
-            # Скрываем категории, показываем счет зачисления
+            # Hide categories, show deposit account
             self.category_label.hide()
             self.category_combo.hide()
             self.transfer_label.show()
             self.transfer_combo.show()
         else:
-            # Показываем категории, скрываем счет зачисления
+            # Show categories, hide deposit account
             self.category_label.show()
             self.category_combo.show()
             self.transfer_label.hide()
@@ -161,25 +161,25 @@ class TransactionDialog(BaseDialog):
         t = self.transaction
         self.amount_input.setText(str(t.amount))
 
-        # Устанавливаем валюту
+        # Set currency
         idx = self.currency_combo.findText(t.currency)
         if idx >= 0:
             self.currency_combo.setCurrentIndex(idx)
 
-        # Устанавливаем дату
+        # Set date
         qdate = QDate.fromString(t.date, "yyyy-MM-dd")
         self.date_input.setDate(qdate)
 
-        # Устанавливаем описание и теги
+        # Set description and tags
         self.desc_input.setText(t.description or "")
         self.tags_input.set_tags(t.tags or "")
 
-        # Устанавливаем счет списания
+        # Set withdrawal account
         idx = self.account_combo.findData(t.account_id)
         if idx >= 0:
             self.account_combo.setCurrentIndex(idx)
 
-        # Определяем тип операции
+        # Determine operation type
         if t.transfer_to_account_id:
             self.type_combo.setCurrentText("Перевод")
             idx_to = self.transfer_combo.findData(t.transfer_to_account_id)
@@ -229,10 +229,10 @@ class TransactionDialog(BaseDialog):
                 QMessageBox.warning(self, "Ошибка категории", "Выберите категорию.")
                 return
 
-        # Создаем/Обновляем транзакцию
+        # Create/Update transaction
         t_id = self.transaction.id if self.transaction else None
 
-        # Если мы редактируем транзакцию, сначала удалим старую, чтобы вернуть балансы, а потом запишем новую
+        # If we are editing a transaction, first delete the old one to restore balances, then write the new one
         if self.transaction:
             self.db.delete_transaction(t_id)
 
@@ -279,7 +279,7 @@ class AccountDialog(BaseDialog):
         self.currency_combo.setCurrentText(base_curr)
         form.addRow("Валюта:", self.currency_combo)
 
-        # Простой выбор цвета (из предопределенных красивых HEX кодов)
+        # Simple color selection (from predefined beautiful HEX codes)
         self.color_combo = QComboBox()
         self.colors = {
             "Зеленый": "#4CAF50",
@@ -314,7 +314,7 @@ class AccountDialog(BaseDialog):
         self.balance_input.setText(str(self.account.balance))
         self.currency_combo.setCurrentText(self.account.currency)
 
-        # Ищем цвет
+        # Look for color
         for i in range(self.color_combo.count()):
             if self.color_combo.itemData(i) == self.account.color:
                 self.color_combo.setCurrentIndex(i)
@@ -425,19 +425,19 @@ class CategoryDialog(BaseDialog):
         self.name_input.setText(self.category.name)
         self.icon_input.setText(self.category.icon or "")
 
-        # Тип
+        # Type
         if self.category.type == "income":
             self.type_combo.setCurrentIndex(1)
         else:
             self.type_combo.setCurrentIndex(0)
 
-        # Родитель
+        # Parent
         if self.category.parent_id:
             idx = self.parent_combo.findData(self.category.parent_id)
             if idx >= 0:
                 self.parent_combo.setCurrentIndex(idx)
 
-        # Цвет
+        # Color
         for i in range(self.color_combo.count()):
             if self.color_combo.itemData(i) == self.category.color:
                 self.color_combo.setCurrentIndex(i)
@@ -451,7 +451,7 @@ class CategoryDialog(BaseDialog):
 
         icon = self.icon_input.text().strip()
         if not icon:
-            icon = "💸"  # Дефолтная иконка
+            icon = "💸"  # Default icon
 
         type_ = self.type_combo.currentData()
         color = self.color_combo.currentData()

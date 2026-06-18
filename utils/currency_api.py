@@ -3,9 +3,9 @@ from database.db_manager import DBManager
 
 def update_exchange_rates(db: DBManager) -> bool:
     """
-    Загружает свежие курсы валют относительно USD
-    и сохраняет их в базу данных как rate_to_usd.
-    1 ед. валюты = X USD (например, 1 RUB = 0.011 USD).
+    Loads fresh currency rates relative to USD
+    and saves them in the database as rate_to_usd.
+    1 unit of currency = X USD (e.g., 1 RUB = 0.011 USD).
     """
     url = "https://open.er-api.com/v6/latest/USD"
     try:
@@ -15,7 +15,7 @@ def update_exchange_rates(db: DBManager) -> bool:
             if data.get("result") == "success":
                 rates = data.get("rates", {})
                 
-                # Мы поддерживаем основные валюты, но можем обновить любые
+                # We support major currencies, but can update any
                 supported_currencies = ["USD", "EUR", "RUB", "BYN", "KZT", "UAH", "GBP"]
                 
                 for code in supported_currencies:

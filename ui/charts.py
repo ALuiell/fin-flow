@@ -5,6 +5,7 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QFrame, QSizePolicy
 from PySide6.QtCore import Qt
+from utils.formatting import format_money
 import numpy as np
 
 class BaseChartWidget(QWidget):
@@ -21,7 +22,7 @@ class BaseChartWidget(QWidget):
             layout.setContentsMargins(0, 0, 0, 0)
             layout.addWidget(self.canvas)
 
-        # Базовая настройка шрифтов и цветов осей
+        # Basic font and axis color setup
         self.text_color = '#E0E0E0'
         self.grid_color = '#2C2C2C'
         
@@ -34,7 +35,7 @@ class BaseChartWidget(QWidget):
         self.ax.grid(True, color=self.grid_color, linestyle='--', alpha=0.5)
 
 class PieChartWidget(BaseChartWidget):
-    """Круговая диаграмма расходов по категориям"""
+    """Pie chart of expenses by category"""
     def __init__(self, parent=None):
         super().__init__(parent, create_layout=False)
         self.categories = []
@@ -87,7 +88,7 @@ class PieChartWidget(BaseChartWidget):
         self.row_widgets = []
 
     def _format_amount(self, amount):
-        return f"{amount:,.2f} {self.base_currency}"
+        return format_money(amount, self.base_currency)
 
     def _build_list(self):
         self._clear_list()
@@ -229,7 +230,7 @@ class PieChartWidget(BaseChartWidget):
         self.canvas.draw_idle()
 
 class CumulativeSpendChartWidget(BaseChartWidget):
-    """Линейный график накопленных трат против идеального бюджета"""
+    """Line chart of cumulative spend vs ideal budget"""
     def draw_chart(self, days: list, actual_spend: list, ideal_spend: list, planned_spend: list):
         self.ax.clear()
         self.ax.set_axis_on()
@@ -254,7 +255,7 @@ class CumulativeSpendChartWidget(BaseChartWidget):
         self.canvas.draw_idle()
 
 class MonthlyBarChartWidget(BaseChartWidget):
-    """Столбчатый график сравнения месяцев за 6 месяцев"""
+    """Bar chart comparing months over 6 months"""
     def draw_chart(self, months: list, incomes: list, expenses: list):
         self.ax.clear()
         self.ax.set_axis_on()
@@ -270,7 +271,7 @@ class MonthlyBarChartWidget(BaseChartWidget):
         x = np.arange(len(months))
         width = 0.35
         
-        # Столбцы доходов и расходов
+        # Income and expense bars
         self.ax.bar(x - width/2, incomes, width, label='Доходы', color='#00E676')
         self.ax.bar(x + width/2, expenses, width, label='Расходы', color='#F44336')
         

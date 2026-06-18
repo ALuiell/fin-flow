@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel,
 from PySide6.QtCore import Qt, QDate, QRect, Signal
 from PySide6.QtGui import QPainter, QColor, QFont, QTextCharFormat
 from database.db_manager import DBManager
+from utils.formatting import format_money
 from datetime import datetime, date
 
 class ExpenseCalendar(QCalendarWidget):
@@ -13,10 +14,10 @@ class ExpenseCalendar(QCalendarWidget):
         self.base_currency = db.get_setting("base_currency", "RUB")
         self.expense_cache = {}
         
-        # Сигнал смены месяца
+        # Month change signal
         self.currentPageChanged.connect(self.load_month_expenses)
         
-        # Первичный запуск
+        # Initial run
         self.load_month_expenses(self.yearShown(), self.monthShown())
         self.setStyleSheet("QCalendarWidget QAbstractItemView { font-size: 14px; }")
         self._apply_weekend_format()
@@ -32,32 +33,32 @@ class ExpenseCalendar(QCalendarWidget):
         self.expense_cache.clear()
         self.base_currency = self.db.get_setting("base_currency", "RUB")
         
-        # Находим первый и последний день месяца
+        # Find the first and last day of the month
         import calendar
         last_day = calendar.monthrange(year, month)[1]
         start_str = f"{year}-{month:02d}-01"
         end_str = f"{year}-{month:02d}-{last_day:02d}"
         
-        # Берем все транзакции за месяц
+        # Get all transactions for the month
         txs = self.db.get_transactions(start_date=start_str, end_date=end_str)
         
-        # Считаем сумму расходов по дням
+        # Calculate the sum of expenses by day
         for t in txs:
             if t['transfer_to_account_id'] is not None:
-                continue # Игнорируем внутренние переводы
+                continue # Ignore internal transfers
             
             if t['category_type'] == 'expense':
                 t_date = t['date'] # YYYY-MM-DD
                 amount_base = self.db.convert_amount(t['amount'], t['currency'], self.base_currency)
                 self.expense_cache[t_date] = self.expense_cache.get(t_date, 0.0) + amount_base
                 
-        self.updateCell(QDate(year, month, 1)) # Принудительно перерисовываем
+        self.updateCell(QDate(year, month, 1)) # Force redraw
 
     def paintCell(self, painter: QPainter, rect: QRect, qdate: QDate):
-        # Отрисовываем стандартную ячейку
+        # Draw the standard cell
         super().paintCell(painter, rect, qdate)
         
-        # Форматируем дату для сверки с кешем
+        # Format the date to check against the cache
         date_str = f"{qdate.year()}-{qdate.month():02d}-{qdate.day():02d}"
         
         if date_str in self.expense_cache:
@@ -65,7 +66,7 @@ class ExpenseCalendar(QCalendarWidget):
             if spent > 0:
                 painter.save()
                 
-                # Цвет текста для трат (неоново-красный/розовый)
+                # Text color for expenses (neon-red/pink)
                 painter.setPen(QColor("#FF4D4D"))
                 
                 font = painter.font()
@@ -73,10 +74,10 @@ class ExpenseCalendar(QCalendarWidget):
                 font.setBold(True)
                 painter.setFont(font)
                 
-                # Рисуем подпись суммы расходов внизу ячейки
+                # Draw the expense amount at the bottom of the cell
                 text_rect = QRect(rect.x(), rect.y() + rect.height() - 17, rect.width(), 15)
                 
-                # Форматируем сумму для экономии места
+                # Format the amount to save space
                 if spent >= 1000:
                     val_str = f"-{spent/1000:.1f}k"
                 else:
@@ -99,15 +100,15 @@ class CalendarPage(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(15)
 
-        # Календарь
+        # Calendar
         self.calendar = ExpenseCalendar(self.db, self)
         self.calendar.clicked.connect(self.on_date_selected)
         
-        # Задаем минимальный размер календаря
+        # Set the minimum size of the calendar
         self.calendar.setMinimumHeight(350)
         layout.addWidget(self.calendar, stretch=2)
 
-        # Панель детального списка транзакций за выбранный день
+        # Detail panel for transactions on the selected day
         details_card = QFrame()
         details_card.setObjectName("CardFrame")
         details_layout = QVBoxLayout(details_card)
@@ -132,40 +133,40 @@ class CalendarPage(QWidget):
 
         layout.addWidget(details_card, stretch=1)
 
-        # Выбираем текущую дату по умолчанию
+        # Select current date by default
         self.on_date_selected(self.calendar.selectedDate())
 
     def refresh_data(self):
-        # Обновляем календарь
+        # Update calendar
         self.calendar.load_month_expenses(self.calendar.yearShown(), self.calendar.monthShown())
         self.calendar.updateCells()
-        # Обновляем таблицу за выбранный день
+        # Update table for selected day
         self.on_date_selected(self.calendar.selectedDate())
 
     def on_date_selected(self, qdate: QDate):
         date_str = f"{qdate.year()}-{qdate.month():02d}-{qdate.day():02d}"
         self.date_label.setText(f"Операции за {qdate.toString('d MMMM yyyy')}")
 
-        # Берем транзакции за выбранный день
+        # Get transactions for the selected day
         txs = self.db.get_transactions(start_date=date_str, end_date=date_str)
         self.tx_table.setRowCount(len(txs))
 
         for row_idx, t in enumerate(txs):
-            # Категория
+            # Category
             if t['transfer_to_account_id']:
                 cat_desc = f"🔄 Перевод на {t['transfer_account_name']}"
             else:
                 cat_desc = f"{t['category_icon']} {t['category_name']}"
             self.tx_table.setItem(row_idx, 0, QTableWidgetItem(cat_desc))
 
-            # Счет
+            # Account
             self.tx_table.setItem(row_idx, 1, QTableWidgetItem(t['account_name']))
 
-            # Описание
+            # Description
             self.tx_table.setItem(row_idx, 2, QTableWidgetItem(t['description'] or ""))
 
-            # Сумма
-            amount_str = f"{t['amount']:,.2f} {t['currency']}"
+            # Amount
+            amount_str = format_money(t['amount'], t['currency'])
             amount_item = QTableWidgetItem()
 
             if t['transfer_to_account_id']:
